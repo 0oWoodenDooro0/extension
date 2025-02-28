@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Shortcut Extensions",
+  "description": "shortcut",
+  "version": "1.0",
+  "action": {},
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "contextMenus",
+    "tabs"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "commands": {
+    "search_on_siro": {
+      "suggested_key": {
+        "default": "Ctrl+M"
+      },
+      "description": "Search on Siro"
+    },
+    "search_on_mis": {
+      "suggested_key": {
+        "default": "Ctrl+S"
+      },
+      "description": "Search on Mis"
+    }
+  }
+}
