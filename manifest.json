@@ -1,17 +1,33 @@
 {
-  "manifest_version": 3,
-  "name": "Shortcut Extensions",
-  "description": "shortcut",
-  "version": "1.0",
-  "action": {},
+  "manifest_version": 2,
+  "name": "Collection",
+  "description": "collection",
+  "version": "1.2",
   "permissions": [
     "activeTab",
     "scripting",
     "contextMenus",
-    "tabs"
+    "tabs",
+    "storage",
+    "downloads",
+    "webRequest",
+    "webRequestBlocking",
+    "webNavigation",
+    "<all_urls>"
   ],
   "background": {
-    "service_worker": "background.js"
+    "scripts": [
+      "background.js"
+    ]
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "vincent031525@gmail.com"
+    }
+  },
+  "sidebar_action": {
+    "default_title": "Collections",
+    "default_panel": "sidebar/sidebar.html"
   },
   "commands": {
     "search_on_siro": {

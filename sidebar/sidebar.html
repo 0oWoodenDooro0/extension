@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Collections</title>
+  <style>
+    body {
+      font-family: "Courier New", monospace;
+      margin: 0;
+    }
+
+    .list {
+      list-style: none;
+      padding: 10px;
+      margin: 0 0 100px;
+      overflow-y: visible;
+    }
+
+    .list li {
+      padding: 8px;
+      border-bottom: 1px solid #eee;
+      cursor: pointer;
+    }
+
+    .list li:hover {
+      background-color: #f0f0f0;
+    }
+
+    .collectionItem {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .collectionItem span {
+      white-space: nowrap;
+      overflow-x: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .collectionSettings {
+      position: relative;
+      display: inline-block;
+    }
+
+    .dropdown-content {
+      display: none;
+      position: absolute;
+      right: 0;
+      background-color: #f9f9f9;
+      min-width: 160px;
+      box-shadow: 0 8px 16px 0 rgba(0, 0, 0, 0.2);
+      z-index: 1;
+    }
+
+    .dropdown-content span {
+      color: black;
+      padding: 12px 16px;
+      text-decoration: none;
+      display: block;
+    }
+
+    .dropdown-content span:hover {
+      background-color: #ddd;
+    }
+
+    .collectionSettings:hover .dropdown-content {
+      display: block;
+    }
+
+    .rename-content {
+      display: none;
+    }
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      padding: 10px;
+      background-color: white;
+      border-bottom: 1px solid #eee;
+      gap: 5px;
+    }
+
+    .search-container {
+      position: relative;
+      width: 100%;
+      margin-top: 5px;
+    }
+
+    .toolbar input[type="search"] {
+      width: 100%;
+      padding: 5px;
+      box-sizing: border-box;
+      padding-right: 30px;
+    }
+
+    #clearSearchButton {
+      position: absolute;
+      right: 5px;
+      top: 50%;
+      transform: translateY(-50%);
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font-size: 1.2em;
+      padding: 0 5px;
+      color: #999;
+    }
+
+    #clearSearchButton:hover {
+      color: #333;
+    }
+
+    #itemTitle {
+      margin-bottom: 0;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+<div id="collections">
+  <div id="collectionToolbar" class="toolbar">
+    <button id="createCollectionButton">Create Collection</button>
+    <button id="exportCollectionButton">Export</button>
+    <button id="importCollectionButton">Import</button>
+    <input id="fileInput" type="file" style="display: none"/>
+  </div>
+  <ul id="collectionList" class="list"></ul>
+</div>
+<div id="items">
+  <div id="itemToolbar" class="toolbar">
+    <button id="backToCollectionButton">Back</button>
+    <button id="addToCollectionButton">Add To Collection</button>
+    <button id="randomButton">Random</button>
+    <h3 id="itemTitle">No Title</h3>
+    <div class="search-container">
+      <input type="search" id="itemSearchInput" placeholder="Search Title or Url...">
+      <button id="clearSearchButton">❌</button>
+    </div>
+  </div>
+  <ul id="itemList" class="list"></ul>
+</div>
+<script src="sidebar.js"></script>
+</body>
+</html>
