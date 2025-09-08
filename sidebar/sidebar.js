@@ -37,6 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentTag = null;
   let editingItemId = null;
   let dragStartIndex;
+  let isEditingFlow = false; // Flag to track if the action is an edit or a new add
 
   // --- Event Listeners ---
   backButton.addEventListener('click', displayTags);
@@ -270,7 +271,9 @@ document.addEventListener('DOMContentLoaded', () => {
     addItemView.style.display = 'block';
     manageTagsView.style.display = 'none';
 
-    if (itemToEdit) {
+    isEditingFlow = !!itemToEdit; // Set the flow flag
+
+    if (isEditingFlow) {
       // Edit mode from context menu
       editingItemId = itemToEdit.id;
       itemTitleInput.value = itemToEdit.title;
@@ -311,9 +314,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function hideAddItemView() {
-    // Instead of going back to the main tag list, go back to the item list we were on.
-    // The `currentTag` variable still holds the state of the last viewed tag.
-    displayItemsByTag(currentTag);
+    // This function handles the "Cancel" button click.
+    // If the user was editing, go back to the item list.
+    // If the user's initial intent was to add, go back to the main tags list.
+    if (isEditingFlow) {
+      displayItemsByTag(currentTag);
+    } else {
+      displayTags();
+    }
   }
 
   function saveItem() {
@@ -351,7 +359,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     saveItems();
-    hideAddItemView();
+
+    // After saving, decide where to go.
+    // If editing, go back to the item list.
+    // If adding, go back to the main tags list.
+    if (isEditingFlow) {
+      displayItemsByTag(currentTag);
+    } else {
+      displayTags();
+    }
   }
 
   function removeItem(itemId) {
