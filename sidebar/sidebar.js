@@ -1,112 +1,178 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const createCollectionButton = document.getElementById('createCollectionButton');
-  createCollectionButton.onclick = createCollection;
-  const exportCollectionButton = document.getElementById('exportCollectionButton');
-  exportCollectionButton.onclick = exportCollections;
-  const importCollectionButton = document.getElementById('importCollectionButton');
-  importCollectionButton.onclick = importCollections;
+  const manageTagsButton = document.getElementById('manageTagsButton');
+  const exportButton = document.getElementById('exportButton');
+  const importButton = document.getElementById('importButton');
   const fileInput = document.getElementById('fileInput');
+  const backButton = document.getElementById('backButton');
+  const addItemButton = document.getElementById('addItemButton');
+  const randomButton = document.getElementById('randomButton');
+  const openAllButton = document.getElementById('openAllButton');
+  const itemSearchInput = document.getElementById('itemSearchInput');
+  const clearSearchButton = document.getElementById('clearSearchButton');
+
+  const tagList = document.getElementById('tagList');
+  const itemList = document.getElementById('itemList');
+  const tagsView = document.getElementById('tagsView');
+  const itemsView = document.getElementById('itemsView');
+
+  const addItemView = document.getElementById('addItemView');
+  const itemTitleInput = document.getElementById('itemTitleInput');
+  const itemUrlInput = document.getElementById('itemUrlInput');
+  const itemTagsInput = document.getElementById('itemTagsInput');
+  const existingTagsContainer = document.getElementById('existingTagsContainer');
+  const saveItemButton = document.getElementById('saveItemButton');
+  const cancelButton = document.getElementById('cancelButton');
+
+  const manageTagsView = document.getElementById('manageTagsView');
+  const manageTagList = document.getElementById('manageTagList');
+  const closeManageTagsButton = document.getElementById('closeManageTagsButton');
+
+  let items = [];
+  let currentTag = null;
+
+  // =================================================================
+  //                       Event Handling
+  // =================================================================
+
+  backButton.onclick = displayTags;
+  exportButton.onclick = exportData;
+  importButton.onclick = () => fileInput.click();
+  randomButton.onclick = randomItem;
+  openAllButton.onclick = openAllItems;
+  addItemButton.onclick = showAddItemView;
+  saveItemButton.onclick = saveItem;
+  cancelButton.onclick = hideAddItemView;
+  manageTagsButton.onclick = showManageTagsView;
+  // closeManageTagsButton.onclick = hideManageTagsView;
+  closeManageTagsButton.addEventListener('click', hideManageTagsView);
+
+  itemSearchInput.addEventListener('input', () => displayItemsByTag(currentTag));
+  clearSearchButton.addEventListener('click', () => {
+    itemSearchInput.value = '';
+    displayItemsByTag(currentTag);
+    itemSearchInput.focus();
+  });
+
   fileInput.addEventListener('change', (event) => {
     const file = event.target.files[0];
     if (file) {
       const reader = new FileReader();
       reader.onload = (e) => {
         try {
-          browser.storage.local.set({ collections: JSON.parse(e.target.result) }, () => {
-            loadCollections();
-          })
-        } catch (e) {
-          console.error('Error', e);
+          const importedItems = JSON.parse(e.target.result);
+          if (Array.isArray(importedItems)) {
+            if (confirm("This will replace all your current items. Are you sure?")) {
+              items = importedItems;
+              saveData();
+              displayTags();
+            }
+          } else {
+            alert("Invalid file format.");
+          }
+        } catch (err) {
+          alert("Error reading file.");
+          console.error('Import Error:', err);
         }
-      }
+      };
       reader.readAsText(file);
     }
-  });
-  const backToCollectionButton = document.getElementById('backToCollectionButton');
-  backToCollectionButton.onclick = backToCollections;
-  const addToCollectionButton = document.getElementById('addToCollectionButton');
-  addToCollectionButton.onclick = addToCollection;
-  const randomButton = document.getElementById('randomButton');
-  randomButton.onclick = random;
-  const openAllButton = document.getElementById('openAllButton');
-  openAllButton.onclick = openAll;
-
-  const itemSearchInput = document.getElementById('itemSearchInput');
-  const clearSearchButton = document.getElementById('clearSearchButton');
-
-  const collectionList = document.getElementById('collectionList');
-  const itemList = document.getElementById('itemList');
-  const collectionsDiv = document.getElementById('collections');
-  const itemsDiv = document.getElementById('items');
-
-  let collections = [];
-  let currentCollectionIndex = -1;
-
-  itemSearchInput.addEventListener('input', () => {
-    displayCollectionItems();
-  });
-
-  clearSearchButton.addEventListener('click', () => {
-    itemSearchInput.value = '';
-    displayCollectionItems();
-    itemSearchInput.focus();
   });
 
   window.addEventListener('click', () => {
     const existingMenu = document.getElementById('customContextMenu');
-    if (existingMenu) {
-      existingMenu.remove();
-    }
+    if (existingMenu) existingMenu.remove();
   });
 
-  function loadCollections() {
-    browser.storage.local.get('collections', (data) => {
-      collections = data.collections || [];
-      displayCollections();
+  // =================================================================
+  //                       Data Handling
+  // =================================================================
+
+  function loadData() {
+    browser.storage.local.get('items', (data) => {
+      items = data.items || [];
+      displayTags();
     });
   }
 
-  function displayCollections() {
-    collectionsDiv.style.display = 'block';
-    itemsDiv.style.display = 'none';
-    collectionList.innerHTML = '';
-    for (let i = 0; i < collections.length; i++) {
+  function saveData() {
+    browser.storage.local.set({ items: items });
+  }
+
+  function getAllTags() {
+    return [...new Set(items.flatMap(item => item.tags || []))].sort((a, b) => a.localeCompare(b[0]));
+  }
+
+  // =================================================================
+  //                       UI Display 
+  // =================================================================
+
+  function displayTags() {
+    tagsView.style.display = 'block';
+    itemsView.style.display = 'none';
+    addItemView.style.display = 'none';
+    manageTagsView.style.display = 'none';
+    tagList.innerHTML = '';
+    currentTag = null;
+
+    const tagMap = new Map();
+    items.forEach(item => {
+      if (Array.isArray(item.tags)) {
+        item.tags.forEach(tag => {
+          tagMap.set(tag, (tagMap.get(tag) || 0) + 1);
+        });
+      }
+    });
+
+    const sortedTags = [...tagMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+
+    const allItemsLi = document.createElement('li');
+    allItemsLi.className = 'listItem';
+    allItemsLi.innerHTML = `<span>All Items (${items.length})</span>`;
+    allItemsLi.onclick = () => displayItemsByTag(null);
+    tagList.appendChild(allItemsLi);
+
+    sortedTags.forEach(([tag, count]) => {
       const listItem = document.createElement('li');
-      const collectionText = document.createElement('span');
-      collectionText.innerText = collections[i].title + `(${collections[i].items.length})`;
-      listItem.className = "collectionItem";
+      listItem.className = 'listItem';
+      listItem.innerHTML = `<span>${tag} (${count})</span>`;
+      listItem.onclick = () => displayItemsByTag(tag);
+      tagList.appendChild(listItem);
+    });
+  }
+  function getCurrentItems() {
+    const itemsToFilter = currentTag ? items.filter(item => item.tags && item.tags.includes(currentTag)) : items;
+
+    const searchTerm = itemSearchInput.value.toLowerCase();
+    return searchTerm
+      ? itemsToFilter.filter(item =>
+        item.title.toLowerCase().includes(searchTerm) ||
+        item.url.toLowerCase().includes(searchTerm)
+      )
+      : itemsToFilter;
+  }
+
+  function displayItemsByTag(tag) {
+    currentTag = tag;
+    tagsView.style.display = 'none';
+    itemsView.style.display = 'block';
+    itemList.innerHTML = '';
+
+    const itemTitle = document.getElementById('itemTitle');
+    itemTitle.innerText = tag || 'All Items';
+
+    const itemsToShow = getCurrentItems();
+
+    itemsToShow.forEach(item => {
+      const listItem = document.createElement('li');
+      listItem.className = 'listItem';
+      listItem.innerHTML = `<span>${item.title}</span>`;
 
       listItem.addEventListener('click', () => {
-        currentCollectionIndex = i;
-        itemSearchInput.value = '';
-        displayCollectionItems();
-      })
-
-      listItem.appendChild(collectionText);
-
-      const renameDiv = document.createElement('div');
-      renameDiv.className = "rename-content";
-      const renameInput = document.createElement('input');
-      renameInput.className = "renameInput";
-      renameInput.type = 'text';
-      renameInput.addEventListener('click', (event) => {
-        event.stopPropagation();
+        browser.tabs.create({ url: item.url });
       });
-      renameInput.value = collections[i].title;
-      const renameButton = document.createElement('button');
-      renameButton.innerText = 'Save';
-      renameButton.addEventListener('click', (event) => {
-        event.stopPropagation();
-        renameCollection(i);
-      });
-      renameDiv.appendChild(renameInput);
-      renameDiv.appendChild(renameButton);
-
-      listItem.appendChild(renameDiv);
 
       listItem.addEventListener('contextmenu', (event) => {
         event.preventDefault();
-
         const existingMenu = document.getElementById('customContextMenu');
         if (existingMenu) existingMenu.remove();
 
@@ -115,204 +181,219 @@ document.addEventListener('DOMContentLoaded', () => {
         contextMenu.style.top = `${event.pageY}px`;
         contextMenu.style.left = `${event.pageX}px`;
 
-        const renameOption = document.createElement('div');
-        renameOption.className = 'context-menu-item';
-        renameOption.innerText = 'Rename';
-        renameOption.onclick = (e) => {
-          e.stopPropagation();
-          showRenameInput(i);
-          contextMenu.remove();
-        };
-
         const deleteOption = document.createElement('div');
         deleteOption.className = 'context-menu-item';
         deleteOption.innerText = 'Delete';
         deleteOption.onclick = (e) => {
           e.stopPropagation();
-          if (confirm(`Are you sure to Delete Collection "${collections[i].title}" ?`)) {
-            deleteCollection(i);
+          if (confirm(`Are you sure you want to delete "${item.title}"?`)) {
+            removeItem(item.id);
           }
           contextMenu.remove();
         };
-
-        contextMenu.appendChild(renameOption);
         contextMenu.appendChild(deleteOption);
         document.body.appendChild(contextMenu);
       });
 
-      collectionList.appendChild(listItem);
-    }
-  }
-
-  function displayCollectionItems() {
-    collectionsDiv.style.display = 'none';
-    itemsDiv.style.display = 'block';
-    itemList.innerHTML = '';
-
-    const currentItems = collections[currentCollectionIndex].items;
-    const collectionTitle = document.getElementById('itemTitle');
-    collectionTitle.innerText = collections[currentCollectionIndex].title;
-    const searchTerm = itemSearchInput.value.toLowerCase();
-    const searchedItems = currentItems.filter(item => item.title.toLowerCase().includes(searchTerm) || item.url.toLowerCase().includes(searchTerm));
-
-    searchedItems.forEach(item => {
-      const originalIndex = currentItems.indexOf(item);
-
-      const listItem = document.createElement('li');
-      const itemText = document.createElement('span')
-
-      itemText.innerText = item.title
-      listItem.className = "collectionItem"
-
-      listItem.addEventListener('click', () => {
-        browser.tabs.create({ url: item.url });
-      });
-
-      listItem.addEventListener('contextmenu', (event) => {
-        event.preventDefault();
-
-        const existingMenu = document.getElementById('customContextMenu');
-        if (existingMenu) {
-          existingMenu.remove();
-        }
-
-        const contextMenu = document.createElement('div');
-        contextMenu.id = 'customContextMenu';
-        contextMenu.style.top = `${event.pageY}px`;
-        contextMenu.style.left = `${event.pageX}px`;
-
-        const deleteOption = document.createElement('div');
-        deleteOption.className = 'context-menu-item';
-        deleteOption.innerText = 'Delete';
-        deleteOption.onclick = (e) => {
-          e.stopPropagation();
-          if (confirm(`Are you sure delete Item "${item.title}" ?`)) {
-            removeItem(originalIndex);
-          }
-          contextMenu.remove();
-        };
-
-        contextMenu.appendChild(deleteOption);
-        document.body.appendChild(contextMenu);
-      });
-
-      listItem.appendChild(itemText)
-
-      itemList.appendChild(listItem)
+      itemList.appendChild(listItem);
     });
   }
 
-  function addToCollection() {
+  // =================================================================
+  //                       Core Function
+  // =================================================================
+
+  function showAddItemView() {
+    tagsView.style.display = 'none';
+    itemsView.style.display = 'none';
+    addItemView.style.display = 'block';
+
     browser.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const currentTab = tabs[0];
-      if (currentTab && !checkDuplicateItem(collections[currentCollectionIndex].items, currentTab.url)) {
-        collections[currentCollectionIndex].items.push({ title: currentTab.title, url: currentTab.url });
-        saveCollections();
-        displayCollectionItems();
+      if (tabs[0]) {
+        itemTitleInput.value = tabs[0].title || '';
+        itemUrlInput.value = tabs[0].url || '';
       }
+    });
+
+    itemTagsInput.value = '';
+    existingTagsContainer.innerHTML = '';
+    const allTags = [...new Set(items.flatMap(item => item.tags || []))].sort();
+
+    allTags.forEach(tag => {
+      const tagButton = document.createElement('span');
+      tagButton.className = 'tag-button';
+      tagButton.textContent = tag;
+      tagButton.onclick = () => {
+        const currentTags = new Set(itemTagsInput.value.split(',').map(t => t.trim()).filter(Boolean));
+        if (currentTags.has(tag)) {
+          currentTags.delete(tag);
+          tagButton.classList.remove('selected');
+        } else {
+          currentTags.add(tag);
+          tagButton.classList.add('selected');
+        }
+        itemTagsInput.value = [...currentTags].join(', ');
+      };
+      existingTagsContainer.appendChild(tagButton);
     });
   }
 
-  function checkDuplicateItem(items, url) {
-    for (let key in items) {
-      if (items[key].url === url) {
-        return true;
+  function hideAddItemView() {
+    addItemView.style.display = 'none';
+    displayTags();
+  }
+
+  function saveItem() {
+    const title = itemTitleInput.value.trim();
+    const url = itemUrlInput.value.trim();
+
+    if (!title || !url) {
+      alert("Title and URL cannot be empty.");
+      return;
+    }
+
+    const tags = [...new Set(itemTagsInput.value.split(',').map(t => t.trim()).filter(Boolean))];
+
+    const existingItemIndex = items.findIndex(item => item.url === url);
+
+    if (existingItemIndex > -1) {
+      items[existingItemIndex].title = title;
+      items[existingItemIndex].tags = tags;
+    } else {
+      const newItem = {
+        id: `item-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        title: title,
+        url: url,
+        tags: tags,
+        addDate: Date.now()
+      };
+      items.push(newItem);
+    }
+
+    saveData();
+    hideAddItemView();
+  }
+
+  function removeItem(itemId) {
+    items = items.filter(item => item.id !== itemId);
+    saveData();
+    displayItemsByTag(currentTag);
+  }
+
+  function showManageTagsView() {
+    tagsView.style.display = 'none';
+    itemsView.style.display = 'none';
+    addItemView.style.display = 'none';
+    manageTagsView.style.display = 'block';
+
+    manageTagList.innerHTML = '';
+    const allTags = getAllTags();
+
+    allTags.forEach(tag => {
+      const listItem = document.createElement('li');
+      listItem.className = 'manage-tag-item';
+
+      const tagName = document.createElement('span');
+      tagName.className = 'tag-name';
+      tagName.textContent = tag;
+
+      const tagActions = document.createElement('div');
+      tagActions.className = 'tag-actions';
+
+      const renameButton = document.createElement('button');
+      renameButton.textContent = 'Rename';
+      renameButton.onclick = () => {
+        const newTagName = prompt(`Enter new name for "${tag}":`, tag);
+        if (newTagName && newTagName.trim() !== '' && newTagName.trim() !== tag) {
+          renameTag(tag, newTagName.trim());
+        }
+      };
+
+      const deleteButton = document.createElement('button');
+      deleteButton.textContent = 'Delete';
+      deleteButton.onclick = () => {
+        if (confirm(`Are you sure you want to delete the tag "${tag}" from all items?`)) {
+          deleteTag(tag);
+        }
+      };
+
+      tagActions.appendChild(renameButton);
+      tagActions.appendChild(deleteButton);
+      listItem.appendChild(tagName);
+      listItem.appendChild(tagActions);
+      manageTagList.appendChild(listItem);
+    });
+  }
+
+  function hideManageTagsView() {
+    displayTags();
+  }
+
+  function renameTag(oldTag, newTag) {
+    items.forEach(item => {
+      if (item.tags && item.tags.includes(oldTag)) {
+        item.tags = item.tags.filter(t => t !== oldTag);
+        if (!item.tags.includes(newTag)) {
+          item.tags.push(newTag);
+        }
       }
-    }
-    return false;
+    });
+    saveData();
+    showManageTagsView();
   }
 
-  function backToCollections() {
-    currentCollectionIndex = -1;
-    displayCollections();
+  function deleteTag(tagToDelete) {
+    items.forEach(item => {
+      if (item.tags) {
+        item.tags = item.tags.filter(t => t !== tagToDelete);
+      }
+    });
+    saveData();
+    showManageTagsView();
   }
 
-  function showRenameInput(index) {
-    // const renameDiv = collectionList.children[index].querySelector('.rename-content');
-    // renameDiv.style.display = 'inline-block';
-    // collectionList.children[index].children[0].innerText = "";
-    const listItem = collectionList.children[index];
-    if (!listItem) return;
-    const renameDiv = listItem.querySelector('.rename-content')
-    const textSpan = listItem.querySelector('.collectionItem > span')
-    renameDiv.style.display = 'inline-block'
-    textSpan.style.display = 'none';
-    renameDiv.querySelector('.renameInput').focus();
-  }
-
-  function renameCollection(index) {
-    const renameInput = collectionList.children[index].querySelector('.renameInput');
-    collections[index].title = renameInput.value;
-    saveCollections();
-    displayCollections();
-  }
-
-  function deleteCollection(index) {
-    collections.splice(index, 1);
-    saveCollections();
-    displayCollections();
-  }
-
-  function createCollection() {
-    collections.push({ title: "New Collection", items: [] });
-    saveCollections();
-    displayCollections();
-  }
-
-  function removeItem(index) {
-    const items = collections[currentCollectionIndex].items;
-    items.splice(index, 1);
-    saveCollections();
-    displayCollectionItems();
-  }
-
-  function random() {
-    const items = collections[currentCollectionIndex].items;
+  function randomItem() {
+    const items = getCurrentItems();
     if (items.length > 0) {
-      const randomItem = items[Math.floor((Math.random() * items.length))];
-      itemSearchInput.value = randomItem.title;
-      displayCollectionItems();
-      browser.tabs.create({ url: randomItem.url });
+      const random = items[Math.floor(Math.random() * items.length)];
+      itemSearchInput.value = random.title;
+      displayItemsByTag(currentTag);
+      browser.tabs.create({ url: random.url });
     }
   }
 
-  function openAll() {
-    const items = collections[currentCollectionIndex].items;
+  function openAllItems() {
+    const items = getCurrentItems();
     if (items.length > 0) {
-      if (confirm(`Are you sure open All ${items.length} tabs in the Collection "${collections[currentCollectionIndex].title}" ?`)) {
+      if (confirm(`Are you sure you want to open ${items.length} tabs?`)) {
         items.forEach(item => {
-          browser.tabs.create({ url: item.url });
+          browser.tabs.create({ url: item.url, active: false });
         });
       }
     }
   }
 
-  function exportCollections() {
-    browser.storage.local.get('collections', (data) => {
-      const collections = data.collections || {};
-      const json = JSON.stringify(collections, null, 2);
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
+  function exportData() {
+    if (items.length === 0) {
+      alert("No items to export.");
+      return;
+    }
+    const json = JSON.stringify(items, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const filename = `items-backup-${new Date().toISOString().split('T')[0]}.json`;
 
-      const filename = `collections-backup-${new Date().toDateString().replaceAll(' ', '_')}.json`;
-      browser.downloads.download({
-        url: url,
-        filename: filename,
-        saveAs: true
-      }).then(() => {
-        URL.revokeObjectURL(url);
-      })
-    })
+    browser.downloads.download({
+      url: url,
+      filename: filename,
+      saveAs: true
+    }).then(() => {
+      URL.revokeObjectURL(url);
+    }, (error) => {
+      console.error("Download failed:", error);
+      URL.revokeObjectURL(url);
+    });
   }
 
-  function importCollections() {
-    const fileInput = document.getElementById('fileInput');
-    fileInput.click();
-  }
-
-  function saveCollections() {
-    browser.storage.local.set({ collections: collections });
-  }
-
-  loadCollections();
+  loadData();
 });

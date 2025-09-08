@@ -26,94 +26,35 @@
       background-color: #f0f0f0;
     }
 
-    .collectionItem {
+    .listItem {
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
 
-    .collectionItem span {
+    .listItem span {
       white-space: nowrap;
       overflow-x: hidden;
       text-overflow: ellipsis;
     }
 
-    .collectionSettings {
-      position: relative;
-      display: inline-block;
-    }
-
-    .dropdown-content {
-      display: none;
-      position: absolute;
-      right: 0;
-      background-color: #f9f9f9;
-      min-width: 160px;
-      box-shadow: 0 8px 16px 0 rgba(0, 0, 0, 0.2);
-      z-index: 1;
-    }
-
-    .dropdown-content span {
-      color: black;
-      padding: 12px 16px;
-      text-decoration: none;
-      display: block;
-    }
-
-    .dropdown-content span:hover {
-      background-color: #ddd;
-    }
-
-    .collectionSettings:hover .dropdown-content {
-      display: block;
-    }
-
-    .rename-content {
-      display: none;
-    }
-
     .toolbar {
       position: sticky;
       top: 0;
-      z-index: 1;
+      z-index: 2;
       padding: 10px;
       background-color: white;
       border-bottom: 1px solid #eee;
+    }
+
+    .toolbar-row {
+      display: flex;
+      align-items: center;
       gap: 5px;
     }
 
-    .search-container {
-      position: relative;
-      width: 100%;
-      margin-top: 5px;
-    }
-
-    .toolbar input[type="search"] {
-      width: 100%;
-      padding: 5px;
-      box-sizing: border-box;
-      padding-right: 30px;
-    }
-
-    #clearSearchButton {
-      position: absolute;
-      right: 5px;
-      top: 50%;
-      transform: translateY(-50%);
-      border: none;
-      background: transparent;
-      cursor: pointer;
-      font-size: 1.2em;
-      padding: 0 5px;
-      color: #999;
-    }
-
-    #clearSearchButton:hover {
-      color: #333;
-    }
-
-    #itemTitle {
-      margin-bottom: 0;
+    #itemTitle, #addItemTitle {
+      margin: 8px 0 0 0;
       width: 100%;
     }
 
@@ -138,32 +79,140 @@
       background-color: #f0f0f0;
     }
 
+    .toolbar input[type="search"] {
+      width: 100%;
+      padding: 5px;
+      box-sizing: border-box;
+      padding-right: 30px;
+    }
+
+    .form-input {
+      width: 95%;
+      margin-bottom: 10px;
+      padding: 5px;
+    }
+
+    .tag-button {
+      display: inline-block;
+      padding: 3px 8px;
+      margin: 3px;
+      background-color: #e0e0e0;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .tag-button:hover {
+      background-color: #c7c7c7;
+    }
+
+    .tag-button.selected {
+      background-color: #007bff;
+      color: white;
+    }
+
+    .search-container {
+      position: relative;
+      margin-top: 8px;
+    }
+
+    #itemSearchInput {
+      width: 100%;
+      padding: 5px 30px 5px 5px;
+      box-sizing: border-box;
+    }
+
+    #clearSearchButton {
+      position: absolute;
+      right: 5px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0;
+      font-size: 16px;
+      line-height: 1;
+    }
+
+    .manage-tag-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 0;
+    }
+    .manage-tag-item .tag-name {
+      flex-grow: 1;
+    }
+    .manage-tag-item .tag-actions button {
+      margin-left: 5px;
+    }
   </style>
 </head>
 <body>
-<div id="collections">
-  <div id="collectionToolbar" class="toolbar">
-    <button id="createCollectionButton">Create Collection</button>
-    <button id="exportCollectionButton">Export</button>
-    <button id="importCollectionButton">Import</button>
-    <input id="fileInput" type="file" style="display: none"/>
+<div id="tagsView">
+  <div id="tagsToolbar" class="toolbar">
+    <button id="manageTagsButton">Manage Tags</button>
+    <button id="addItemButton">Add Item</button>
+    <button id="exportButton">Export</button>
+    <button id="importButton">Import</button>
+    <input id="fileInput" type="file" style="display: none;"/>
   </div>
-  <ul id="collectionList" class="list"></ul>
+
+  <ul id="tagList" class="list"></ul>
 </div>
-<div id="items">
+
+<div id="itemsView" style="display: none;">
   <div id="itemToolbar" class="toolbar">
-    <button id="backToCollectionButton">Back</button>
-    <button id="addToCollectionButton">Add To Collection</button>
-    <button id="randomButton">Random</button>
-    <button id="openAllButton">Open All</button>
-    <h3 id="itemTitle">No Title</h3>
+    <div class="toolbar-row">
+      <button id="backButton">Back</button>
+      <button id="randomButton">Random</button>
+      <button id="openAllButton">Open All</button>
+    </div>
+
     <div class="search-container">
       <input type="search" id="itemSearchInput" placeholder="Search Title or Url...">
       <button id="clearSearchButton">❌</button>
     </div>
+
+    <h3 id="itemTitle">No Title</h3>
   </div>
   <ul id="itemList" class="list"></ul>
 </div>
+
+<div id="addItemView" style="display: none;">
+  <div class="toolbar">
+    <h3 id="addItemTitle">Add New Item</h3>
+  </div>
+  <div style="padding: 10px;">
+    <label for="itemTitleInput">Title:</label>
+    <input type="text" id="itemTitleInput" class="form-input">
+
+    <label for="itemUrlInput">URL:</label>
+    <input type="text" id="itemUrlInput" class="form-input">
+
+    <label for="itemTagsInput">Tags (comma separated):</label>
+    <input type="text" id="itemTagsInput" class="form-input">
+
+    <p style="margin-top:0; margin-bottom: 5px;">Or select existing tags:</p>
+    <div id="existingTagsContainer" style="margin-bottom: 15px; border: 1px solid #ccc; padding: 5px; max-height: 100px; overflow-y: auto;">
+    </div>
+
+    <button id="saveItemButton">Save</button>
+    <button id="cancelButton">Cancel</button>
+  </div>
+</div>
+
+<div id="manageTagsView" style="display: none;">
+  <div class="toolbar">
+    <h3 id="manageTagsTitle">Manage Tags</h3>
+  </div>
+  <div style="padding: 10px;">
+    <ul id="manageTagList" class="list" style="padding-top: 0;"></ul>
+    <button id="closeManageTagsButton">Close</button>
+  </div>
+</div>
+
 <script src="sidebar.js"></script>
 </body>
 </html>
