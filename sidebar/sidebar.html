@@ -116,6 +116,28 @@
       margin-bottom: 0;
       width: 100%;
     }
+
+    #customContextMenu {
+      position: absolute;
+      background-color: #f9f9f9;
+      border: 1px solid #ccc;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+      z-index: 1000;
+      min-width: 120px;
+      border-radius: 4px;
+      padding: 4px 0;
+    }
+
+    .context-menu-item {
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .context-menu-item:hover {
+      background-color: #f0f0f0;
+    }
+
   </style>
 </head>
 <body>
@@ -133,6 +155,7 @@
     <button id="backToCollectionButton">Back</button>
     <button id="addToCollectionButton">Add To Collection</button>
     <button id="randomButton">Random</button>
+    <button id="openAllButton">Open All</button>
     <h3 id="itemTitle">No Title</h3>
     <div class="search-container">
       <input type="search" id="itemSearchInput" placeholder="Search Title or Url...">

@@ -2,7 +2,7 @@
   "manifest_version": 2,
   "name": "Collection",
   "description": "collection",
-  "version": "1.2",
+  "version": "1.3",
   "permissions": [
     "activeTab",
     "scripting",

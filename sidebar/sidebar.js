@@ -28,6 +28,8 @@ document.addEventListener('DOMContentLoaded', () => {
   addToCollectionButton.onclick = addToCollection;
   const randomButton = document.getElementById('randomButton');
   randomButton.onclick = random;
+  const openAllButton = document.getElementById('openAllButton');
+  openAllButton.onclick = openAll;
 
   const itemSearchInput = document.getElementById('itemSearchInput');
   const clearSearchButton = document.getElementById('clearSearchButton');
@@ -50,6 +52,13 @@ document.addEventListener('DOMContentLoaded', () => {
     itemSearchInput.focus();
   });
 
+  window.addEventListener('click', () => {
+    const existingMenu = document.getElementById('customContextMenu');
+    if (existingMenu) {
+      existingMenu.remove();
+    }
+  });
+
   function loadCollections() {
     browser.storage.local.get('collections', (data) => {
       collections = data.collections || [];
@@ -66,25 +75,15 @@ document.addEventListener('DOMContentLoaded', () => {
       const collectionText = document.createElement('span');
       collectionText.innerText = collections[i].title + `(${collections[i].items.length})`;
       listItem.className = "collectionItem";
+
       listItem.addEventListener('click', () => {
         currentCollectionIndex = i;
         itemSearchInput.value = '';
         displayCollectionItems();
       })
+
       listItem.appendChild(collectionText);
 
-      const collectionSettings = document.createElement('div');
-      collectionSettings.className = "collectionSettings";
-      collectionSettings.innerText = "⚙️";
-
-      const dropdown = document.createElement('div');
-      dropdown.className = "dropdown-content";
-      const renameItem = document.createElement('span');
-      renameItem.innerText = "Rename";
-      renameItem.addEventListener('click', (event) => {
-        event.stopPropagation();
-        showRenameInput(i);
-      });
       const renameDiv = document.createElement('div');
       renameDiv.className = "rename-content";
       const renameInput = document.createElement('input');
@@ -103,17 +102,44 @@ document.addEventListener('DOMContentLoaded', () => {
       renameDiv.appendChild(renameInput);
       renameDiv.appendChild(renameButton);
 
-      const deleteItem = document.createElement('span');
-      deleteItem.innerText = "Delete";
-      deleteItem.addEventListener('click', (event) => {
-        event.stopPropagation();
-        deleteCollection(i);
-      });
       listItem.appendChild(renameDiv);
-      dropdown.appendChild(renameItem);
-      dropdown.appendChild(deleteItem);
-      collectionSettings.appendChild(dropdown);
-      listItem.appendChild(collectionSettings);
+
+      listItem.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+
+        const existingMenu = document.getElementById('customContextMenu');
+        if (existingMenu) existingMenu.remove();
+
+        const contextMenu = document.createElement('div');
+        contextMenu.id = 'customContextMenu';
+        contextMenu.style.top = `${event.pageY}px`;
+        contextMenu.style.left = `${event.pageX}px`;
+
+        const renameOption = document.createElement('div');
+        renameOption.className = 'context-menu-item';
+        renameOption.innerText = 'Rename';
+        renameOption.onclick = (e) => {
+          e.stopPropagation();
+          showRenameInput(i);
+          contextMenu.remove();
+        };
+
+        const deleteOption = document.createElement('div');
+        deleteOption.className = 'context-menu-item';
+        deleteOption.innerText = 'Delete';
+        deleteOption.onclick = (e) => {
+          e.stopPropagation();
+          if (confirm(`Are you sure to Delete Collection "${collections[i].title}" ?`)) {
+            deleteCollection(i);
+          }
+          contextMenu.remove();
+        };
+
+        contextMenu.appendChild(renameOption);
+        contextMenu.appendChild(deleteOption);
+        document.body.appendChild(contextMenu);
+      });
+
       collectionList.appendChild(listItem);
     }
   }
@@ -137,28 +163,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
       itemText.innerText = item.title
       listItem.className = "collectionItem"
+
       listItem.addEventListener('click', () => {
         browser.tabs.create({ url: item.url });
       });
+
+      listItem.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+
+        const existingMenu = document.getElementById('customContextMenu');
+        if (existingMenu) {
+          existingMenu.remove();
+        }
+
+        const contextMenu = document.createElement('div');
+        contextMenu.id = 'customContextMenu';
+        contextMenu.style.top = `${event.pageY}px`;
+        contextMenu.style.left = `${event.pageX}px`;
+
+        const deleteOption = document.createElement('div');
+        deleteOption.className = 'context-menu-item';
+        deleteOption.innerText = 'Delete';
+        deleteOption.onclick = (e) => {
+          e.stopPropagation();
+          if (confirm(`Are you sure delete Item "${item.title}" ?`)) {
+            removeItem(originalIndex);
+          }
+          contextMenu.remove();
+        };
+
+        contextMenu.appendChild(deleteOption);
+        document.body.appendChild(contextMenu);
+      });
+
       listItem.appendChild(itemText)
 
-      const itemSettings = document.createElement('div')
-      itemSettings.className = "collectionSettings"
-      itemSettings.innerText = "⚙️"
-
-      const dropdown = document.createElement('div')
-      dropdown.className = "dropdown-content"
-
-      const deleteItem = document.createElement('span')
-      deleteItem.innerText = "刪除"
-      deleteItem.addEventListener('click', (event) => {
-        event.stopPropagation()
-        removeItem(originalIndex)
-      })
-
-      dropdown.appendChild(deleteItem)
-      itemSettings.appendChild(dropdown)
-      listItem.appendChild(itemSettings)
       itemList.appendChild(listItem)
     });
   }
@@ -189,9 +228,16 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function showRenameInput(index) {
-    const renameDiv = collectionList.children[index].querySelector('.rename-content');
-    renameDiv.style.display = 'inline-block';
-    collectionList.children[index].children[0].innerText = "";
+    // const renameDiv = collectionList.children[index].querySelector('.rename-content');
+    // renameDiv.style.display = 'inline-block';
+    // collectionList.children[index].children[0].innerText = "";
+    const listItem = collectionList.children[index];
+    if (!listItem) return;
+    const renameDiv = listItem.querySelector('.rename-content')
+    const textSpan = listItem.querySelector('.collectionItem > span')
+    renameDiv.style.display = 'inline-block'
+    textSpan.style.display = 'none';
+    renameDiv.querySelector('.renameInput').focus();
   }
 
   function renameCollection(index) {
@@ -227,6 +273,17 @@ document.addEventListener('DOMContentLoaded', () => {
       itemSearchInput.value = randomItem.title;
       displayCollectionItems();
       browser.tabs.create({ url: randomItem.url });
+    }
+  }
+
+  function openAll() {
+    const items = collections[currentCollectionIndex].items;
+    if (items.length > 0) {
+      if (confirm(`Are you sure open All ${items.length} tabs in the Collection "${collections[currentCollectionIndex].title}" ?`)) {
+        items.forEach(item => {
+          browser.tabs.create({ url: item.url });
+        });
+      }
     }
   }
 
