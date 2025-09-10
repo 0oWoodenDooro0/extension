@@ -5,32 +5,78 @@
     <title>Collections</title>
     <style>
         body {
-            font-family: "Segoe UI", "Roboto", "Helvetica Neue", sans-serif;
+            font-family: "Courier New", monospace;
             margin: 0;
-            user-select: none;
+            color: #333;
         }
 
         .view {
             display: none;
         }
 
+        .toolbar {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+            flex-wrap: wrap; /* Add this line to allow wrapping */
+        }
+        
+        .button-group .spacer {
+            flex-grow: 1;
+        }
+        
+        button {
+            padding: 5px 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background-color: #fff;
+            cursor: pointer;
+            font-family: inherit;
+            white-space: nowrap; 
+        }
+
+        button:hover {
+            background-color: #f0f0f0;
+        }
+        
+        h3 {
+            margin: 10px 0 5px;
+            padding: 0 10px;
+            font-size: 1.1em;
+        }
+
         .list {
             list-style: none;
-            padding: 10px;
+            padding: 0 10px 10px;
             margin: 0;
         }
 
         .listItem {
-            padding: 10px;
+            padding: 10px 8px;
             border-bottom: 1px solid #eee;
             cursor: pointer;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            transition: background-color 0.2s ease;
         }
 
         .listItem:hover {
             background-color: #f0f0f0;
+        }
+        
+        .listItem.highlighted {
+            background-color: #e0efff; /* A light blue */
+            transition: background-color 0.5s ease;
         }
 
         .listItem span {
@@ -39,234 +85,249 @@
             text-overflow: ellipsis;
         }
         
-        .toolbar {
-            position: sticky;
-            top: 0;
-            z-index: 10;
-            padding: 10px;
-            background-color: white;
-            border-bottom: 1px solid #eee;
-        }
-        
-        .toolbar-row {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .toolbar-spacer {
-            flex-grow: 1;
-        }
-        
-        .toolbar h3 {
-             margin: 0;
-             margin-top: 10px;
-        }
-
+        /* Search Bar */
         .search-container {
             position: relative;
-            margin-top: 10px;
+            margin: 10px 0 5px;
+            padding: 0 10px;
         }
 
         #itemSearchInput {
-            padding: 5px 25px 5px 8px;
+            width: 100%;
+            padding: 8px 25px 8px 10px;
             border: 1px solid #ccc;
             border-radius: 4px;
-            width: 100%;
             box-sizing: border-box;
+            font-family: inherit;
         }
 
         #clearSearchButton {
             position: absolute;
-            right: 5px;
+            right: 15px;
             top: 50%;
             transform: translateY(-50%);
             border: none;
             background: none;
             cursor: pointer;
-            color: #888;
             font-size: 16px;
+            color: #888;
             padding: 0 5px;
         }
+        #clearSearchButton:hover {
+            color: #333;
+        }
         
+        /* Tag Filter Bar */
+        #tagFilterContainer {
+            display: none; /* Hidden by default */
+            flex-wrap: wrap;
+            gap: 5px;
+            padding: 10px 10px 0;
+            border-top: 1px solid #eee;
+            margin-top: 10px;
+        }
+
+        /* Context Menu */
         #customContextMenu {
             position: absolute;
             z-index: 1000;
             background-color: white;
             border: 1px solid #ccc;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
             border-radius: 4px;
-            padding: 5px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            min-width: 120px;
         }
-
         .context-menu-item {
-            padding: 8px 15px;
+            padding: 8px 12px;
             cursor: pointer;
         }
-
         .context-menu-item:hover {
             background-color: #f0f0f0;
         }
-
-        /* Add/Edit Item View Styles */
-        .add-item-form {
-            padding: 15px;
+        
+        /* Add/Edit/Manage Views */
+        #addItemView, #manageTagsView {
+             padding: 10px;
+        }
+        
+        .view-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
         }
 
-        .add-item-form h3 {
-            margin-top: 0;
+        .view-header h3 {
+            margin: 0;
+            padding: 0;
         }
-
-        .add-item-form label {
-            display: block;
-            margin-bottom: 5px;
-        }
-
-        .add-item-form input[type="text"] {
-            width: calc(100% - 12px);
-            padding: 5px;
+        
+        .form-group {
             margin-bottom: 10px;
         }
         
-        .tag-container {
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        .form-group input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        #existingTagsContainer {
             display: flex;
             flex-wrap: wrap;
             gap: 5px;
             padding: 5px;
-            border: 1px solid #ccc;
+            border: 1px solid #ddd;
             border-radius: 4px;
             max-height: 150px;
             overflow-y: auto;
         }
         
         .tag-button {
-            padding: 5px 10px;
-            background-color: #eee;
-            border: 1px solid #ddd;
-            border-radius: 15px;
+            padding: 3px 8px;
+            border: 1px solid #ccc;
+            border-radius: 12px;
             cursor: pointer;
-            font-size: 12px;
+            background-color: #f7f7f7;
+            font-size: 0.9em;
         }
         
         .tag-button.selected {
             background-color: #007bff;
             color: white;
-            border-color: #0056b3;
+            border-color: #007bff;
         }
         
-        /* Manage Tags View Styles */
-        .add-tag-form {
-            padding: 10px;
-            display: flex;
-            gap: 10px;
-            border-bottom: 1px solid #eee;
-        }
-        .add-tag-form input {
-            flex-grow: 1;
-            padding: 5px;
-        }
-        
+        /* Manage Tags View */
         .manage-tag-item {
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            padding: 10px;
+            padding: 8px;
             border-bottom: 1px solid #eee;
         }
         
-        .tag-actions button {
-            margin-left: 5px;
-        }
-
-        /* Drag and Drop Styles */
         .drag-handle {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            margin-right: 10px;
             cursor: grab;
-            background-image: url('data:image/svg+xml;charset=UTF-8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-grip-vertical" viewBox="0 0 16 16"><path d="M7 2a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-3 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-3 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/></svg>');
-            opacity: 0.5;
+            margin-right: 10px;
+            color: #aaa;
         }
-
+        .drag-handle::before {
+            content: '☰';
+        }
+        
         .manage-tag-item.dragging {
-            opacity: 0.4;
-            background: #e7f3ff;
+            opacity: 0.5;
+            background: #cce5ff;
         }
 
         .manage-tag-item.drag-over {
             border-top: 2px solid #007bff;
+        }
+        
+        .tag-name {
+            flex-grow: 1;
+        }
+        
+        .tag-actions button {
+            margin-left: 5px;
+            font-size: 0.8em;
+            padding: 2px 6px;
+        }
+        
+        .add-tag-form {
+            display: flex;
+            gap: 5px;
+            margin-top: 10px;
+        }
+        
+        .add-tag-form input {
+            flex-grow: 1;
         }
 
     </style>
 </head>
 <body>
 
-<div id="tagsView" class="view">
+<!-- Main View (Tags) -->
+<div id="tagsView" class="view" style="display: block;">
     <div class="toolbar">
-        <h3>Tags</h3>
-        <button id="manageTagsButton">Manage Tags</button>
-        <button id="addItemButton">Add Item</button>
-        <button id="exportButton">Export</button>
-        <button id="importButton">Import</button>
+        <div class="button-group">
+            <button id="manageTagsButton">Manage Tags</button>
+            <button id="addItemButton">Add Item</button>
+            <span class="spacer"></span>
+            <button id="exportButton">Export</button>
+            <button id="importButton">Import</button>
+        </div>
         <input id="fileInput" type="file" style="display: none"/>
     </div>
     <ul id="tagList" class="list"></ul>
 </div>
 
+<!-- Items View (list of items for a tag) -->
 <div id="itemsView" class="view">
     <div class="toolbar">
-        <div class="toolbar-row">
+       <div class="button-group">
             <button id="backButton">Back</button>
-            <span class="toolbar-spacer"></span>
-            <button id="randomButton">Random</button>
+            <span class="spacer"></span>
+            <button id="randomButton" title="Randomly pick an item from this category">Random</button>
             <button id="openAllButton">Open All</button>
         </div>
+        <div id="tagFilterContainer" class="tag-filter-container"></div>
         <div class="search-container">
-            <input type="search" id="itemSearchInput" placeholder="Search items...">
-            <button id="clearSearchButton">&times;</button>
+            <input type="search" id="itemSearchInput" placeholder="Search in items...">
+            <button id="clearSearchButton" title="Clear search">×</button>
         </div>
-        <h3 id="itemTitle"></h3>
     </div>
+    <h3 id="itemTitle"></h3>
     <ul id="itemList" class="list"></ul>
 </div>
 
+<!-- Add/Edit Item View -->
 <div id="addItemView" class="view">
-     <div class="toolbar">
-        <h3>Add / Edit Item</h3>
+    <div class="view-header">
+        <h3>Add/Edit Item</h3>
     </div>
-    <div class="add-item-form">
-        <label for="itemTitleInput">Title:</label>
-        <input type="text" id="itemTitleInput">
-
-        <label for="itemUrlInput">URL:</label>
-        <input type="text" id="itemUrlInput">
-
-        <h4>Choose Tags:</h4>
-        <div id="existingTagsContainer" class="tag-container">
-            <!-- Tag buttons will be generated here -->
-        </div>
-        
-        <div style="margin-top: 15px;">
-            <button id="saveItemButton">Save</button>
-            <button id="cancelButton">Cancel</button>
-        </div>
+    <div class="form-group">
+        <label for="itemTitleInput">Title</label>
+        <input type="text" id="itemTitleInput" placeholder="Enter title">
+    </div>
+    <div class="form-group">
+        <label for="itemUrlInput">URL</label>
+        <input type="text" id="itemUrlInput" placeholder="Enter URL">
+    </div>
+    <div class="form-group">
+        <label>Choose Tags</label>
+        <div id="existingTagsContainer"></div>
+    </div>
+    <div class="button-group">
+        <button id="saveItemButton">Save</button>
+        <button id="cancelButton">Cancel</button>
     </div>
 </div>
 
+<!-- Manage Tags View -->
 <div id="manageTagsView" class="view">
-    <div class="toolbar">
+    <div class="view-header">
         <h3>Manage Tags</h3>
         <button id="closeManageTagsButton">Close</button>
     </div>
-    <div class="add-tag-form">
-        <input type="text" id="newTagInput" placeholder="New Tag Name">
-        <button id="addNewTagButton">Add Tag</button>
-    </div>
     <ul id="manageTagList" class="list"></ul>
+    <div class="add-tag-form">
+        <input type="text" id="newTagInput" placeholder="Enter new tag name...">
+        <button id="addNewTagButton">Add</button>
+    </div>
 </div>
 
 <script src="sidebar.js"></script>
+
 </body>
 </html>
 
