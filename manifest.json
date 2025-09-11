@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "Collection",
-  "description": "collection",
-  "version": "1.5",
+  "description": "A browser extension to collect and tag items.",
+  "version": "1.6",
   "permissions": [
     "activeTab",
     "scripting",

@@ -4,14 +4,72 @@
     <meta charset="utf-8">
     <title>Collections</title>
     <style>
+        :root {
+            --toolbar-height: auto;
+            --list-padding: 10px;
+        }
+
         body {
-            font-family: "Courier New", monospace;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
             margin: 0;
-            color: #333;
+            user-select: none;
         }
 
         .view {
             display: none;
+        }
+
+        .list {
+            list-style: none;
+            padding: var(--list-padding);
+            margin: 0;
+            overflow-y: auto;
+            max-height: calc(100vh - var(--toolbar-height) - 2 * var(--list-padding));
+        }
+
+        .listItem {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .listItem > span {
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.4em;
+            max-height: 4.2em;
+            font-weight: 500;
+            flex-grow: 1;
+            min-width: 0;
+        }
+        
+        .listItem .item-image {
+            border-radius: 4px;
+            background-color: #f0f0f0;
+            flex-shrink: 0;
+
+            /* --- New Smart Layout Logic --- */
+            /* Set maximum boundaries for the image */
+            max-width: 50%;
+            max-height: 120px; /* Prevents tall images from taking too much space */
+
+            /* Let the browser calculate the final size while maintaining aspect ratio */
+            width: auto;
+            height: auto;
+        }
+
+        .listItem:hover {
+            background-color: #f0f0f0;
+        }
+        .listItem.highlighted {
+            background-color: #e0f0ff;
+            transition: background-color 0.3s ease-in-out;
         }
 
         .toolbar {
@@ -19,15 +77,28 @@
             top: 0;
             z-index: 10;
             padding: 10px;
-            background-color: #f9f9f9;
-            border-bottom: 1px solid #ddd;
+            background-color: white;
+            border-bottom: 1px solid #eee;
+        }
+
+        .toolbar h3 {
+            margin: 10px 0 0;
+            padding: 0;
+        }
+        
+        .toolbar .button-group-top {
+             display: flex;
+             flex-wrap: wrap;
+             gap: 8px;
         }
 
         .button-group {
+            margin-bottom: 10px;
+        }
+        
+        .button-group .button-row {
             display: flex;
-            gap: 5px;
-            align-items: center;
-            flex-wrap: wrap; /* Add this line to allow wrapping */
+            gap: 8px;
         }
         
         .button-group .spacer {
@@ -35,279 +106,236 @@
         }
         
         button {
-            padding: 5px 10px;
+            padding: 6px 12px;
             border: 1px solid #ccc;
             border-radius: 4px;
-            background-color: #fff;
+            background-color: #f8f8f8;
             cursor: pointer;
-            font-family: inherit;
-            white-space: nowrap; 
+            white-space: nowrap;
         }
 
         button:hover {
-            background-color: #f0f0f0;
+            background-color: #eee;
         }
         
-        h3 {
-            margin: 10px 0 5px;
-            padding: 0 10px;
-            font-size: 1.1em;
+        .button-danger {
+            background-color: #e53e3e;
+            color: white;
+            border-color: #c53030;
+        }
+        .button-danger:hover {
+            background-color: #c53030;
         }
 
-        .list {
-            list-style: none;
-            padding: 0 10px 10px;
-            margin: 0;
-        }
-
-        .listItem {
-            padding: 10px 8px;
-            border-bottom: 1px solid #eee;
-            cursor: pointer;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            transition: background-color 0.2s ease;
-        }
-
-        .listItem:hover {
-            background-color: #f0f0f0;
-        }
-        
-        .listItem.highlighted {
-            background-color: #e0efff; /* A light blue */
-            transition: background-color 0.5s ease;
-        }
-
-        .listItem span {
-            white-space: nowrap;
-            overflow-x: hidden;
-            text-overflow: ellipsis;
-        }
-        
-        /* Search Bar */
         .search-container {
             position: relative;
-            margin: 10px 0 5px;
-            padding: 0 10px;
+            margin-top: 10px;
         }
 
         #itemSearchInput {
             width: 100%;
-            padding: 8px 25px 8px 10px;
+            padding: 6px 24px 6px 8px;
+            box-sizing: border-box;
             border: 1px solid #ccc;
             border-radius: 4px;
-            box-sizing: border-box;
-            font-family: inherit;
         }
 
         #clearSearchButton {
             position: absolute;
-            right: 15px;
+            right: 5px;
             top: 50%;
             transform: translateY(-50%);
             border: none;
             background: none;
             cursor: pointer;
             font-size: 16px;
+            padding: 0 4px;
             color: #888;
-            padding: 0 5px;
         }
         #clearSearchButton:hover {
             color: #333;
         }
         
-        /* Tag Filter Bar */
         #tagFilterContainer {
-            display: none; /* Hidden by default */
-            flex-wrap: wrap;
-            gap: 5px;
-            padding: 10px 10px 0;
-            border-top: 1px solid #eee;
             margin-top: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
         }
 
-        /* Context Menu */
         #customContextMenu {
-            position: absolute;
+            position: fixed;
             z-index: 1000;
             background-color: white;
             border: 1px solid #ccc;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.15);
             border-radius: 4px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            min-width: 120px;
+            padding: 5px 0;
         }
+
         .context-menu-item {
-            padding: 8px 12px;
+            padding: 8px 15px;
             cursor: pointer;
         }
+
         .context-menu-item:hover {
             background-color: #f0f0f0;
         }
-        
-        /* Add/Edit/Manage Views */
-        #addItemView, #manageTagsView {
-             padding: 10px;
-        }
-        
-        .view-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
 
-        .view-header h3 {
-            margin: 0;
-            padding: 0;
+        /* Add/Edit View Styles */
+        .form-container {
+            padding: 10px;
         }
-        
         .form-group {
-            margin-bottom: 10px;
+            margin-bottom: 15px;
         }
-        
         .form-group label {
             display: block;
             margin-bottom: 5px;
             font-weight: bold;
         }
-        
-        .form-group input[type="text"] {
+        .form-group input {
             width: 100%;
             padding: 8px;
+            box-sizing: border-box;
             border: 1px solid #ccc;
             border-radius: 4px;
-            box-sizing: border-box;
         }
-        
-        #existingTagsContainer {
+        .tag-selector {
             display: flex;
             flex-wrap: wrap;
-            gap: 5px;
+            gap: 8px;
             padding: 5px;
-            border: 1px solid #ddd;
+            border: 1px solid #ccc;
             border-radius: 4px;
             max-height: 150px;
             overflow-y: auto;
         }
-        
         .tag-button {
-            padding: 3px 8px;
-            border: 1px solid #ccc;
+            padding: 4px 8px;
+            border: 1px solid #ddd;
             border-radius: 12px;
             cursor: pointer;
-            background-color: #f7f7f7;
-            font-size: 0.9em;
+            background-color: #f8f8f8;
+            font-size: 12px;
         }
-        
         .tag-button.selected {
             background-color: #007bff;
             color: white;
             border-color: #007bff;
         }
-        
-        /* Manage Tags View */
+        .view-footer {
+            padding: 10px;
+            border-top: 1px solid #eee;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        .view-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+
+        /* Manage Tags View Styles */
+        .manage-tag-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
         .manage-tag-item {
             display: flex;
             align-items: center;
             padding: 8px;
             border-bottom: 1px solid #eee;
         }
-        
+        .manage-tag-item.dragging {
+            opacity: 0.5;
+        }
+        .manage-tag-item.drag-over {
+            background-color: #e0f0ff;
+        }
         .drag-handle {
-            cursor: grab;
+            cursor: move;
             margin-right: 10px;
-            color: #aaa;
+            color: #888;
         }
         .drag-handle::before {
             content: '☰';
         }
-        
-        .manage-tag-item.dragging {
-            opacity: 0.5;
-            background: #cce5ff;
-        }
-
-        .manage-tag-item.drag-over {
-            border-top: 2px solid #007bff;
-        }
-        
         .tag-name {
             flex-grow: 1;
         }
-        
         .tag-actions button {
             margin-left: 5px;
-            font-size: 0.8em;
-            padding: 2px 6px;
         }
-        
-        .add-tag-form {
-            display: flex;
-            gap: 5px;
-            margin-top: 10px;
-        }
-        
-        .add-tag-form input {
-            flex-grow: 1;
-        }
-
     </style>
 </head>
 <body>
 
-<!-- Main View (Tags) -->
-<div id="tagsView" class="view" style="display: block;">
+<!-- Tags View (Main View) -->
+<div id="tagsView" class="view">
     <div class="toolbar">
-        <div class="button-group">
+        <div class="button-group-top">
             <button id="manageTagsButton">Manage Tags</button>
             <button id="addItemButton">Add Item</button>
             <span class="spacer"></span>
             <button id="exportButton">Export</button>
             <button id="importButton">Import</button>
+            <input id="fileInput" type="file" style="display: none"/>
         </div>
-        <input id="fileInput" type="file" style="display: none"/>
     </div>
     <ul id="tagList" class="list"></ul>
 </div>
 
-<!-- Items View (list of items for a tag) -->
+<!-- Items View -->
 <div id="itemsView" class="view">
     <div class="toolbar">
-       <div class="button-group">
-            <button id="backButton">Back</button>
-            <span class="spacer"></span>
-            <button id="randomButton" title="Randomly pick an item from this category">Random</button>
-            <button id="openAllButton">Open All</button>
+        <div class="button-group">
+            <div class="button-row">
+                <button id="backButton">Back</button>
+                <span class="spacer"></span>
+                <button id="randomButton">Random</button>
+                <button id="openAllButton">Open All</button>
+            </div>
         </div>
-        <div id="tagFilterContainer" class="tag-filter-container"></div>
         <div class="search-container">
             <input type="search" id="itemSearchInput" placeholder="Search in items...">
-            <button id="clearSearchButton" title="Clear search">×</button>
+            <button id="clearSearchButton" title="Clear search">&times;</button>
         </div>
+        <div id="tagFilterContainer"></div>
+        <h3 id="itemTitle"></h3>
     </div>
-    <h3 id="itemTitle"></h3>
     <ul id="itemList" class="list"></ul>
 </div>
 
 <!-- Add/Edit Item View -->
 <div id="addItemView" class="view">
-    <div class="view-header">
-        <h3>Add/Edit Item</h3>
+    <div class="toolbar">
+        <h3>Add / Edit Item</h3>
     </div>
-    <div class="form-group">
-        <label for="itemTitleInput">Title</label>
-        <input type="text" id="itemTitleInput" placeholder="Enter title">
+    <div class="form-container">
+        <div class="form-group">
+            <label for="itemTitleInput">Title</label>
+            <input type="text" id="itemTitleInput">
+        </div>
+        <div class="form-group">
+            <label for="itemUrlInput">URL</label>
+            <input type="url" id="itemUrlInput">
+        </div>
+        <div class="form-group">
+            <label for="itemImageUrlInput">Image URL</label>
+            <input type="url" id="itemImageUrlInput" placeholder="Leave empty to auto-detect">
+        </div>
+        <div class="form-group">
+            <label>Choose Tags</label>
+            <div id="existingTagsContainer" class="tag-selector"></div>
+        </div>
     </div>
-    <div class="form-group">
-        <label for="itemUrlInput">URL</label>
-        <input type="text" id="itemUrlInput" placeholder="Enter URL">
-    </div>
-    <div class="form-group">
-        <label>Choose Tags</label>
-        <div id="existingTagsContainer"></div>
-    </div>
-    <div class="button-group">
+    <div class="view-footer">
+        <button id="deleteItemButton" class="button-danger">Delete</button>
+        <div class="spacer"></div>
         <button id="saveItemButton">Save</button>
         <button id="cancelButton">Cancel</button>
     </div>
@@ -315,19 +343,26 @@
 
 <!-- Manage Tags View -->
 <div id="manageTagsView" class="view">
-    <div class="view-header">
-        <h3>Manage Tags</h3>
-        <button id="closeManageTagsButton">Close</button>
+    <div class="toolbar">
+        <div class="view-header">
+            <h3>Manage Tags</h3>
+            <button id="closeManageTagsButton">Close</button>
+        </div>
     </div>
-    <ul id="manageTagList" class="list"></ul>
-    <div class="add-tag-form">
-        <input type="text" id="newTagInput" placeholder="Enter new tag name...">
-        <button id="addNewTagButton">Add</button>
+    <div class="form-container">
+        <div class="form-group">
+            <label for="newTagInput">Add New Tag</label>
+            <div style="display: flex; gap: 10px;">
+                <input type="text" id="newTagInput" placeholder="Enter new tag name" style="flex-grow: 1;">
+                <button id="addNewTagButton">Add</button>
+            </div>
+        </div>
+        <hr>
+        <ul id="manageTagList" class="manage-tag-list"></ul>
     </div>
 </div>
 
 <script src="sidebar.js"></script>
-
 </body>
 </html>
 
