@@ -36,7 +36,14 @@
             gap: 10px;
         }
 
-        .listItem > span {
+        .listItem > div {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+            min-width: 0;
+        }
+
+        .listItem .item-title {
             display: -webkit-box;
             -webkit-line-clamp: 3;
             -webkit-box-orient: vertical;
@@ -45,21 +52,20 @@
             line-height: 1.4em;
             max-height: 4.2em;
             font-weight: 500;
-            flex-grow: 1;
-            min-width: 0;
+        }
+
+        .listItem .item-actor {
+            font-size: 0.85em;
+            color: #666;
+            margin-top: 4px;
         }
         
         .listItem .item-image {
             border-radius: 4px;
             background-color: #f0f0f0;
             flex-shrink: 0;
-
-            /* --- New Smart Layout Logic --- */
-            /* Set maximum boundaries for the image */
             max-width: 50%;
-            max-height: 120px; /* Prevents tall images from taking too much space */
-
-            /* Let the browser calculate the final size while maintaining aspect ratio */
+            max-height: 120px;
             width: auto;
             height: auto;
         }
@@ -163,6 +169,20 @@
             gap: 8px;
         }
 
+        #actorFilterContainer {
+            margin-top: 10px;
+            display: none; /* Hidden by default, shown in All Items */
+        }
+        
+        /* Styled input for actor filter */
+        #actorFilterInput {
+            width: 100%;
+            padding: 6px;
+            box-sizing: border-box;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+
         #customContextMenu {
             position: fixed;
             z-index: 1000;
@@ -218,12 +238,36 @@
             cursor: pointer;
             background-color: #f8f8f8;
             font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
         }
         .tag-button.selected {
             background-color: #007bff;
             color: white;
             border-color: #007bff;
         }
+        
+        .actor-chip {
+            padding: 4px 8px;
+            background-color: #e0e0e0;
+            border-radius: 16px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            border: 1px solid #ccc;
+        }
+        .actor-chip .remove-actor {
+            cursor: pointer;
+            font-weight: bold;
+            color: #666;
+            padding: 0 2px;
+        }
+        .actor-chip .remove-actor:hover {
+            color: red;
+        }
+
         .view-footer {
             padding: 10px;
             border-top: 1px solid #eee;
@@ -236,7 +280,6 @@
             justify-content: space-between;
             align-items: center;
         }
-
 
         /* Manage Tags View Styles */
         .manage-tag-list {
@@ -301,10 +344,17 @@
             </div>
         </div>
         <div class="search-container">
-            <input type="search" id="itemSearchInput" placeholder="Search in items...">
+            <input type="search" id="itemSearchInput" placeholder="Search items or actors...">
             <button id="clearSearchButton" title="Clear search">&times;</button>
         </div>
         <div id="tagFilterContainer"></div>
+        
+        <!-- Modified Actor Filter Container -->
+        <div id="actorFilterContainer">
+            <input type="text" id="actorFilterInput" list="actorFilterDatalist" placeholder="Filter by Actor (Type to search)">
+            <datalist id="actorFilterDatalist"></datalist>
+        </div>
+        
         <h3 id="itemTitle"></h3>
     </div>
     <ul id="itemList" class="list"></ul>
@@ -328,6 +378,17 @@
             <label for="itemImageUrlInput">Image URL</label>
             <input type="url" id="itemImageUrlInput" placeholder="Leave empty to auto-detect">
         </div>
+        
+        <div class="form-group">
+            <label for="itemActorInput">Actors</label>
+            <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+                <input type="text" id="itemActorInput" list="actorSuggestions" placeholder="Type name and press Enter or Add" style="flex-grow: 1;">
+                <datalist id="actorSuggestions"></datalist>
+                <button id="addActorButton" type="button">Add</button>
+            </div>
+            <div id="selectedActorsContainer" class="tag-selector" style="min-height: 40px;"></div>
+        </div>
+
         <div class="form-group">
             <label>Choose Tags</label>
             <div id="existingTagsContainer" class="tag-selector"></div>
@@ -365,4 +426,3 @@
 <script src="sidebar.js"></script>
 </body>
 </html>
-

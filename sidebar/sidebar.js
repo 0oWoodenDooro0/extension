@@ -18,6 +18,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const clearSearchButton = document.getElementById('clearSearchButton');
   const tagFilterContainer = document.getElementById('tagFilterContainer');
 
+  // Updated Elements for Actor Filter
+  const actorFilterContainer = document.getElementById('actorFilterContainer');
+  const actorFilterInput = document.getElementById('actorFilterInput');
+  const actorFilterDatalist = document.getElementById('actorFilterDatalist');
+
   const saveItemButton = document.getElementById('saveItemButton');
   const cancelButton = document.getElementById('cancelButton');
   const deleteItemButton = document.getElementById('deleteItemButton');
@@ -32,6 +37,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const itemTitleInput = document.getElementById('itemTitleInput');
   const itemUrlInput = document.getElementById('itemUrlInput');
   const itemImageUrlInput = document.getElementById('itemImageUrlInput');
+
+  // New Elements for Actors (Add/Edit View)
+  const itemActorInput = document.getElementById('itemActorInput');
+  const addActorButton = document.getElementById('addActorButton');
+  const selectedActorsContainer = document.getElementById('selectedActorsContainer');
+  const actorSuggestions = document.getElementById('actorSuggestions');
+
   const existingTagsContainer = document.getElementById('existingTagsContainer');
 
   const newTagInput = document.getElementById('newTagInput');
@@ -42,9 +54,13 @@ document.addEventListener('DOMContentLoaded', () => {
   let tags = [];
   let currentTag = null;
   let activeFilters = [];
+  let currentActorFilter = "";
   let editingItemId = null;
   let isEditingFlow = false;
   let draggedTag = null;
+
+  // State for editing item actors
+  let currentEditingActors = [];
 
   // --- Event Listeners ---
   manageTagsButton.addEventListener('click', showManageTagsView);
@@ -60,6 +76,20 @@ document.addEventListener('DOMContentLoaded', () => {
   clearSearchButton.addEventListener('click', () => {
     itemSearchInput.value = '';
     displayItemsByTag(currentTag);
+  });
+
+  // Listen to input changes on the filter box
+  actorFilterInput.addEventListener('input', (e) => {
+    currentActorFilter = e.target.value.trim();
+    renderFilteredList();
+  });
+
+  addActorButton.addEventListener('click', handleAddActor);
+  itemActorInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAddActor();
+    }
   });
 
   saveItemButton.addEventListener('click', saveItem);
@@ -116,8 +146,11 @@ document.addEventListener('DOMContentLoaded', () => {
   function createTagListItem(tagName, count, onClick) {
     const listItem = document.createElement('li');
     listItem.className = "listItem";
+
     const tagText = document.createElement('span');
     tagText.innerText = `${tagName} (${count})`;
+    tagText.style.fontWeight = '500';
+
     listItem.appendChild(tagText);
     listItem.addEventListener('click', onClick);
     return listItem;
@@ -126,19 +159,52 @@ document.addEventListener('DOMContentLoaded', () => {
   function displayItemsByTag(tag) {
     currentTag = tag;
     showView(itemsView);
-    itemList.innerHTML = '';
+
     itemTitle.innerText = tag;
+
+    // Reset actor filter when switching tags
+    if (tag !== currentTag) {
+      currentActorFilter = "";
+      actorFilterInput.value = "";
+    }
 
     if (tag === "All Items") {
       tagFilterContainer.style.display = 'flex';
       populateTagFilterBar();
+      actorFilterContainer.style.display = 'block';
+      populateActorFilterOptions();
     } else {
       tagFilterContainer.style.display = 'none';
       activeFilters = [];
+      actorFilterContainer.style.display = 'none';
+      currentActorFilter = "";
+      actorFilterInput.value = "";
     }
 
-    let itemsToDisplay = getFilteredItems();
+    renderFilteredList();
+  }
 
+  function populateActorFilterOptions() {
+    const allActorsSet = new Set();
+    items.forEach(item => {
+      if (item.actors && Array.isArray(item.actors)) {
+        item.actors.forEach(a => allActorsSet.add(a));
+      }
+    });
+
+    const allActors = [...allActorsSet].sort();
+
+    actorFilterDatalist.innerHTML = ''; // Clear existing options
+
+    allActors.forEach(actor => {
+      const option = document.createElement('option');
+      option.value = actor;
+      actorFilterDatalist.appendChild(option);
+    });
+  }
+
+  function renderFilteredList() {
+    let itemsToDisplay = getFilteredItems();
     itemsToDisplay.sort((a, b) => a.addDate - b.addDate);
 
     itemList.innerHTML = '';
@@ -147,9 +213,22 @@ document.addEventListener('DOMContentLoaded', () => {
       listItem.className = "listItem";
       listItem.id = `item-${item.id}`;
 
-      const itemText = document.createElement('span');
-      itemText.innerText = item.title;
-      listItem.appendChild(itemText);
+      const textContainer = document.createElement('div');
+
+      const itemTitleSpan = document.createElement('span');
+      itemTitleSpan.className = 'item-title';
+      itemTitleSpan.innerText = item.title;
+      textContainer.appendChild(itemTitleSpan);
+
+      const actors = item.actors || [];
+      if (actors.length > 0) {
+        const itemActorSpan = document.createElement('span');
+        itemActorSpan.className = 'item-actor';
+        itemActorSpan.innerText = `Actors: ${actors.join(', ')}`;
+        textContainer.appendChild(itemActorSpan);
+      }
+
+      listItem.appendChild(textContainer);
 
       if (item.imageUrl) {
         const itemImage = document.createElement('img');
@@ -251,8 +330,12 @@ document.addEventListener('DOMContentLoaded', () => {
     itemTitleInput.value = '';
     itemUrlInput.value = '';
     itemImageUrlInput.value = '';
+    itemActorInput.value = '';
+    currentEditingActors = [];
 
-    if (itemId) { // --- Editing existing item ---
+    populateActorSuggestions();
+
+    if (itemId) {
       itemToEdit = items.find(i => i.id === itemId);
       if (!itemToEdit) return;
 
@@ -261,31 +344,30 @@ document.addEventListener('DOMContentLoaded', () => {
       itemTitleInput.value = itemToEdit.title;
       itemUrlInput.value = itemToEdit.url;
       itemImageUrlInput.value = itemToEdit.imageUrl || '';
+
+      // Load existing actors (Direct array assignment)
+      currentEditingActors = itemToEdit.actors ? [...itemToEdit.actors] : [];
+
       deleteItemButton.style.display = 'block';
 
       populateTagSelector(itemToEdit.tags || []);
 
-      // If the item doesn't have an image, try to fetch one for its URL.
       if (!itemToEdit.imageUrl && itemToEdit.url) {
-        console.log(`Item "${itemToEdit.title}" is missing an image. Fetching from its URL...`);
         browser.runtime.sendMessage({ action: 'getImage', url: itemToEdit.url })
           .then(response => {
             if (response && response.imageUrl) {
-              console.log(`Image found: ${response.imageUrl}`);
-              itemImageUrlInput.value = response.imageUrl; // Update the UI
+              itemImageUrlInput.value = response.imageUrl;
               const itemIndex = items.findIndex(i => i.id === itemId);
               if (itemIndex !== -1) {
                 items[itemIndex].imageUrl = response.imageUrl;
-                saveData(); // Save the change immediately
+                saveData();
               }
-            } else {
-              console.log("No image found for this item's URL.");
             }
           })
-          .catch(error => console.error("Error fetching image during edit:", error));
+          .catch(error => console.error("Error fetching image:", error));
       }
 
-    } else { // --- Adding new item ---
+    } else {
       isEditingFlow = false;
       editingItemId = null;
       deleteItemButton.style.display = 'none';
@@ -300,18 +382,77 @@ document.addEventListener('DOMContentLoaded', () => {
         if (existingItem) {
           populateTagSelector(existingItem.tags || []);
           itemImageUrlInput.value = existingItem.imageUrl || '';
+          currentEditingActors = existingItem.actors ? [...existingItem.actors] : [];
         } else {
           populateTagSelector([]);
+          currentEditingActors = [];
         }
 
-        // Auto fetch image for new items from the current tab
+        renderActorChips();
+
         browser.runtime.sendMessage({ action: 'getImage', url: currentTab.url }).then(response => {
           if (response && response.imageUrl) {
             itemImageUrlInput.value = response.imageUrl;
           }
-        }).catch(error => console.error("Error fetching image for new item:", error));
+        }).catch(error => console.error("Error:", error));
       });
     }
+
+    renderActorChips();
+  }
+
+  function handleAddActor() {
+    const val = itemActorInput.value.trim();
+    if (val) {
+      const names = val.split(',').map(s => s.trim()).filter(s => s);
+      names.forEach(name => {
+        if (!currentEditingActors.includes(name)) {
+          currentEditingActors.push(name);
+        }
+      });
+      itemActorInput.value = '';
+      renderActorChips();
+    }
+  }
+
+  function renderActorChips() {
+    selectedActorsContainer.innerHTML = '';
+    currentEditingActors.forEach(actor => {
+      const chip = document.createElement('span');
+      chip.className = 'actor-chip';
+
+      const nameSpan = document.createElement('span');
+      nameSpan.innerText = actor;
+
+      const removeBtn = document.createElement('span');
+      removeBtn.className = 'remove-actor';
+      removeBtn.innerText = '×';
+      removeBtn.title = 'Remove actor';
+      removeBtn.addEventListener('click', () => {
+        currentEditingActors = currentEditingActors.filter(a => a !== actor);
+        renderActorChips();
+      });
+
+      chip.appendChild(nameSpan);
+      chip.appendChild(removeBtn);
+      selectedActorsContainer.appendChild(chip);
+    });
+  }
+
+  function populateActorSuggestions() {
+    if (!actorSuggestions) return;
+    actorSuggestions.innerHTML = '';
+    const allActorsSet = new Set();
+    items.forEach(item => {
+      if (item.actors) item.actors.forEach(a => allActorsSet.add(a));
+    });
+    const allActors = [...allActorsSet].sort();
+
+    allActors.forEach(actor => {
+      const option = document.createElement('option');
+      option.value = actor;
+      actorSuggestions.appendChild(option);
+    });
   }
 
   function populateTagSelector(selectedTags) {
@@ -343,6 +484,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const title = itemTitleInput.value.trim();
     const url = itemUrlInput.value.trim();
     const imageUrl = itemImageUrlInput.value.trim();
+
+    const actors = currentEditingActors;
+
     if (!title || !url) return;
 
     const selectedTags = Array.from(existingTagsContainer.querySelectorAll('.tag-button.selected'))
@@ -351,20 +495,20 @@ document.addEventListener('DOMContentLoaded', () => {
     let existingItem = editingItemId ? items.find(i => i.id === editingItemId) : items.find(i => i.url === url);
 
     if (existingItem) {
-      // Update existing item
       existingItem.title = title;
-      existingItem.url = url; // Allow URL to be edited too
+      existingItem.url = url;
       existingItem.tags = selectedTags;
       existingItem.imageUrl = imageUrl || null;
+      existingItem.actors = actors;
     } else {
-      // Add new item
       const newItem = {
         id: `item-${Date.now()}`,
         title,
         url,
         tags: selectedTags,
         addDate: Date.now(),
-        imageUrl: imageUrl || null
+        imageUrl: imageUrl || null,
+        actors: actors
       };
       items.push(newItem);
     }
@@ -487,7 +631,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // --- Drag and Drop for Tags ---
   function handleDragStart(e) {
     draggedTag = e.target.dataset.tag;
     e.target.classList.add('dragging');
@@ -569,12 +712,23 @@ document.addEventListener('DOMContentLoaded', () => {
       );
     }
 
+    if (currentTag === "All Items" && currentActorFilter) {
+      filtered = filtered.filter(item => {
+        const actors = item.actors || [];
+        return actors.includes(currentActorFilter);
+      });
+    }
+
     const searchTerm = itemSearchInput.value.toLowerCase();
     if (searchTerm) {
-      filtered = filtered.filter(item =>
-        item.title.toLowerCase().includes(searchTerm) ||
-        item.url.toLowerCase().includes(searchTerm)
-      );
+      filtered = filtered.filter(item => {
+        const titleMatch = item.title.toLowerCase().includes(searchTerm);
+        const urlMatch = item.url.toLowerCase().includes(searchTerm);
+        const actors = item.actors || [];
+        const actorMatch = actors.some(a => a.toLowerCase().includes(searchTerm));
+
+        return titleMatch || urlMatch || actorMatch;
+      });
     }
     return filtered;
   }
@@ -628,4 +782,3 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- Initial Load ---
   loadData();
 });
-
