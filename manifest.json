@@ -2,7 +2,7 @@
   "manifest_version": 2,
   "name": "Collection",
   "description": "A browser extension to collect and tag items.",
-  "version": "1.6",
+  "version": "1.8",
   "permissions": [
     "activeTab",
     "scripting",
@@ -18,7 +18,8 @@
   "background": {
     "scripts": [
       "background.js"
-    ]
+    ],
+    "type": "module"
   },
   "browser_specific_settings": {
     "gecko": {
@@ -41,6 +42,13 @@
         "default": "Ctrl+S"
       },
       "description": "Search on Mis"
+    },
+    "add-current-tab": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "Add current tab to collections"
     }
   }
 }

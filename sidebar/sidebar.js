@@ -18,7 +18,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const clearSearchButton = document.getElementById('clearSearchButton');
   const tagFilterContainer = document.getElementById('tagFilterContainer');
 
-  // Updated Elements for Actor Filter
   const actorFilterContainer = document.getElementById('actorFilterContainer');
   const actorFilterInput = document.getElementById('actorFilterInput');
   const actorFilterDatalist = document.getElementById('actorFilterDatalist');
@@ -38,7 +37,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const itemUrlInput = document.getElementById('itemUrlInput');
   const itemImageUrlInput = document.getElementById('itemImageUrlInput');
 
-  // New Elements for Actors (Add/Edit View)
   const itemActorInput = document.getElementById('itemActorInput');
   const addActorButton = document.getElementById('addActorButton');
   const selectedActorsContainer = document.getElementById('selectedActorsContainer');
@@ -59,7 +57,6 @@ document.addEventListener('DOMContentLoaded', () => {
   let isEditingFlow = false;
   let draggedTag = null;
 
-  // State for editing item actors
   let currentEditingActors = [];
 
   // --- Event Listeners ---
@@ -78,7 +75,6 @@ document.addEventListener('DOMContentLoaded', () => {
     displayItemsByTag(currentTag);
   });
 
-  // Listen to input changes on the filter box
   actorFilterInput.addEventListener('input', (e) => {
     currentActorFilter = e.target.value.trim();
     renderFilteredList();
@@ -110,7 +106,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function saveData() {
-    browser.storage.local.set({ items: items, tags: tags });
+    browser.storage.local.set({
+      items: items,
+      tags: tags
+    });
   }
 
   // --- View Management ---
@@ -162,7 +161,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     itemTitle.innerText = tag;
 
-    // Reset actor filter when switching tags
     if (tag !== currentTag) {
       currentActorFilter = "";
       actorFilterInput.value = "";
@@ -194,7 +192,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const allActors = [...allActorsSet].sort();
 
-    actorFilterDatalist.innerHTML = ''; // Clear existing options
+    actorFilterDatalist.innerHTML = '';
 
     allActors.forEach(actor => {
       const option = document.createElement('option');
@@ -234,12 +232,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const itemImage = document.createElement('img');
         itemImage.className = 'item-image';
         itemImage.src = item.imageUrl;
-        itemImage.onerror = (e) => { e.target.style.display = 'none'; };
+        itemImage.onerror = (e) => {
+          e.target.style.display = 'none';
+        };
         listItem.appendChild(itemImage);
       }
 
       listItem.addEventListener('click', () => {
-        browser.tabs.create({ url: item.url });
+        browser.tabs.create({
+          url: item.url
+        });
       });
 
       listItem.addEventListener('contextmenu', (e) => {
@@ -345,7 +347,6 @@ document.addEventListener('DOMContentLoaded', () => {
       itemUrlInput.value = itemToEdit.url;
       itemImageUrlInput.value = itemToEdit.imageUrl || '';
 
-      // Load existing actors (Direct array assignment)
       currentEditingActors = itemToEdit.actors ? [...itemToEdit.actors] : [];
 
       deleteItemButton.style.display = 'block';
@@ -353,15 +354,14 @@ document.addEventListener('DOMContentLoaded', () => {
       populateTagSelector(itemToEdit.tags || []);
 
       if (!itemToEdit.imageUrl && itemToEdit.url) {
-        browser.runtime.sendMessage({ action: 'getImage', url: itemToEdit.url })
+        browser.runtime.sendMessage({
+          action: 'getImage',
+          url: itemToEdit.url
+        })
           .then(response => {
             if (response && response.imageUrl) {
+              // 僅填入輸入框，等待使用者按下 Save
               itemImageUrlInput.value = response.imageUrl;
-              const itemIndex = items.findIndex(i => i.id === itemId);
-              if (itemIndex !== -1) {
-                items[itemIndex].imageUrl = response.imageUrl;
-                saveData();
-              }
             }
           })
           .catch(error => console.error("Error fetching image:", error));
@@ -371,7 +371,10 @@ document.addEventListener('DOMContentLoaded', () => {
       isEditingFlow = false;
       editingItemId = null;
       deleteItemButton.style.display = 'none';
-      browser.tabs.query({ active: true, currentWindow: true }).then(tabs => {
+      browser.tabs.query({
+        active: true,
+        currentWindow: true
+      }).then(tabs => {
         const currentTab = tabs[0];
         if (!currentTab) return;
 
@@ -390,7 +393,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         renderActorChips();
 
-        browser.runtime.sendMessage({ action: 'getImage', url: currentTab.url }).then(response => {
+        browser.runtime.sendMessage({
+          action: 'getImage',
+          url: currentTab.url
+        }).then(response => {
           if (response && response.imageUrl) {
             itemImageUrlInput.value = response.imageUrl;
           }
@@ -674,7 +680,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (confirm(`Open ${itemsToOpen.length} tabs?`)) {
         itemSearchInput.value = '';
         itemsToOpen.forEach(item => {
-          browser.tabs.create({ url: item.url, active: false });
+          browser.tabs.create({
+            url: item.url,
+            active: false
+          });
         });
         displayItemsByTag(currentTag);
       }
@@ -685,11 +694,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const itemsToChooseFrom = getFilteredItems();
     if (itemsToChooseFrom.length > 0) {
       const randomItem = itemsToChooseFrom[Math.floor(Math.random() * itemsToChooseFrom.length)];
-      browser.tabs.create({ url: randomItem.url });
+      browser.tabs.create({
+        url: randomItem.url
+      });
 
       const listItem = document.getElementById(`item-${randomItem.id}`);
       if (listItem) {
-        listItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        listItem.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center'
+        });
         listItem.classList.add('highlighted');
         setTimeout(() => {
           listItem.classList.remove('highlighted');
@@ -740,7 +754,9 @@ document.addEventListener('DOMContentLoaded', () => {
         tags: data.tags || []
       };
       const json = JSON.stringify(dataToExport, null, 2);
-      const blob = new Blob([json], { type: 'application/json' });
+      const blob = new Blob([json], {
+        type: 'application/json'
+      });
       const url = URL.createObjectURL(blob);
       const filename = `collection_backup_${new Date().toISOString().split('T')[0]}.json`;
 
@@ -778,6 +794,33 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     fileInput.value = '';
   }
+
+  // --- Storage Listener ---
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local') {
+      if (manageTagsView.style.display === 'block') {
+        if (changes.items) items = changes.items.newValue || [];
+        if (changes.tags) tags = changes.tags.newValue || [];
+        displayManageTagList(); // 確保列表與數據同步（選用，確保多視窗同步）
+        return;
+      }
+
+      if (changes.items) {
+        items = changes.items.newValue || [];
+        if (currentTag) {
+          displayItemsByTag(currentTag);
+        } else {
+          displayTags();
+        }
+      }
+      if (changes.tags) {
+        tags = changes.tags.newValue || [];
+        if (!currentTag) {
+          displayTags();
+        }
+      }
+    }
+  });
 
   // --- Initial Load ---
   loadData();

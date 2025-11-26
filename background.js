@@ -1,113 +1,54 @@
-function createContextMenu() {
-  browser.contextMenus.create({
-    id: "searchOnMis", title: "Search on Mis", contexts: ["selection"]
-  })
-  browser.contextMenus.create({
-    id: "searchOnSiro", title: "Search on Siro", contexts: ["selection"]
-  })
-  browser.contextMenus.create({
-    id: "searchOnVida", title: "Search on Vida", contexts: ["selection"]
-  })
-  browser.contextMenus.create({
-    id: "searchOnVidc", title: "Search on Vidc", contexts: ["selection"]
-  })
-}
+import { addSearchShortcut, redirectUrl } from './utils.js'
 
-browser.runtime.onStartup.addListener(createContextMenu)
-browser.runtime.onInstalled.addListener(createContextMenu)
+addSearchShortcut();
 
-browser.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId === "searchOnMis") {
-    const query = info.selectionText.trim();
-    searchOnMissav(query)
-  } else if (info.menuItemId === "searchOnSiro") {
-    const query = info.selectionText.trim();
-    searchOnSiro(query)
-  } else if (info.menuItemId === "searchOnVida") {
-    const query = info.selectionText.trim()
-    searchOnVida(query)
-  } else if (info.menuItemId === "searchOnVidc") {
-    const query = info.selectionText.trim()
-    searchOnVidc(query)
-  }
-});
+redirectUrl();
 
-browser.commands.onCommand.addListener((command) => {
-  browser.tabs.query({ currentWindow: true, active: true }, function (result) {
-    let tab = result[0];
-    browser.scripting.executeScript({
-      target: { tabId: tab.id }, function: () => {
-        return window.getSelection().toString();
+// 監聽快捷鍵指令
+browser.commands.onCommand.addListener(async (command) => {
+  if (command === "add-current-tab") {
+    try {
+      const tabs = await browser.tabs.query({
+        active: true,
+        currentWindow: true
+      });
+      const currentTab = tabs[0];
+
+      if (!currentTab) return;
+
+      const data = await browser.storage.local.get(['items']);
+      let items = data.items || [];
+
+      // 檢查是否已經存在 (避免重複)
+      const existingItem = items.find(i => i.url === currentTab.url);
+
+      if (existingItem) {
+        console.log("Item already exists:", currentTab.title);
+        return;
       }
-    }, (selection) => {
-      const query = selection[0].result.trim();
-      if (command === "search_on_mis") {
-        searchOnMissav(query)
-      } else if (command === "search_on_siro") {
-        searchOnSiro(query)
-      }
-    });
-  });
-})
 
-function searchOnMissav(query) {
-  const data = query.match(/([a-zA-Z]+)(0+)?-?(\d{3,})/)
-  let id = (data === null) ? query : data[1] + "-" + data[3]
-  const misSearchUrl = `https://missav.ai/search/${encodeURIComponent(id)}`;
-  browser.tabs.create({ url: misSearchUrl });
-}
+      const newItem = {
+        id: `item-${Date.now()}`,
+        title: currentTab.title,
+        url: currentTab.url,
+        tags: [],
+        actors: [],
+        addDate: Date.now(),
+        imageUrl: null
+      };
 
-function searchOnSiro(query) {
-  const siroSearchUrl = `https://sirowiki.com/search/?keyword=${encodeURIComponent(query)}`;
-  browser.tabs.create({ url: siroSearchUrl });
-}
+      items.push(newItem);
+      await browser.storage.local.set({
+        items: items
+      });
 
-function searchOnVida(query) {
-  const data = query.match(/([a-zA-Z]+)(0+)?-?(\d{3,})/)
-  let id = (data === null) ? query : data[1] + " " + data[3]
-  const vidaSearchUrl = `https://video.dmm.co.jp/av/list/?key=${encodeURIComponent(id)}`;
-  browser.tabs.create({ url: vidaSearchUrl });
-}
+      console.log("Item added via shortcut:", newItem.title);
 
-function searchOnVidc(query) {
-  const data = query.match(/([a-zA-Z]+)(0+)?-?(\d{3,})/)
-  let id = (data === null) ? query : data[1] + " " + data[3]
-  const vidcSearchUrl = `https://video.dmm.co.jp/amateur/list/?key=${encodeURIComponent(id)}`;
-  browser.tabs.create({ url: vidcSearchUrl });
-}
-
-
-function cleanUrlParameters(details) {
-  const originalUrl = details.url;
-
-  if (details.type !== 'main_frame') {
-    return;
-  }
-
-  const url = new URL(originalUrl);
-  const params = url.searchParams;
-
-  if (params.has('id') && params.size > 1) {
-    const idValue = params.get('id');
-
-    const newUrl = `${url.origin}${url.pathname}?id=${encodeURIComponent(idValue)}`;
-
-    if (originalUrl !== newUrl) {
-      return { redirectUrl: newUrl };
+    } catch (error) {
+      console.error("Error adding item from background:", error);
     }
   }
-
-  return;
-}
-
-browser.webRequest.onBeforeRequest.addListener(
-  cleanUrlParameters,
-  {
-    urls: ["https://video.dmm.co.jp/*"],
-    types: ["main_frame"]
-  },
-  ["blocking"]
-);
+});
 
 // This script acts as the central communicator.
 
