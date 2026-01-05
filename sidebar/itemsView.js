@@ -3,8 +3,10 @@ import { state, saveData } from './store.js';
 
 // --- Local State for this view ---
 let currentTag = "All Items"; // 預設為 All Items
-let activeFilters = [];
+let activeFilters = []; // 存放選中的標籤名稱，或是特殊的 "_UNTAGGED_"
 let currentActorFilter = "";
+
+const UNTAGGED_KEY = "_UNTAGGED_"; // 特殊的過濾 Key
 
 // --- DOM Elements ---
 let itemList, itemSearchInput, tagFilterContainer;
@@ -18,7 +20,6 @@ export function initItemsView(injectedCallbacks) {
   callbacks = injectedCallbacks;
 
   itemList = document.getElementById('itemList');
-  // Removed: itemTitle = document.getElementById('itemTitle'); 
   itemSearchInput = document.getElementById('itemSearchInput');
   tagFilterContainer = document.getElementById('tagFilterContainer');
   actorFilterContainer = document.getElementById('actorFilterContainer');
@@ -47,7 +48,6 @@ export function initItemsView(injectedCallbacks) {
   const randomBtn = document.getElementById('randomButton');
   if (randomBtn) randomBtn.addEventListener('click', randomItem);
 
-  // Open All 被移除了或需要移到其他地方，這裡暫時保留邏輯，如果 HTML 有按鈕就會運作
   const openAllBtn = document.getElementById('openAllButton');
   if (openAllBtn) openAllBtn.addEventListener('click', openAllItems);
 }
@@ -98,6 +98,21 @@ function populateTagFilterBar() {
   if (!tagFilterContainer) return;
 
   tagFilterContainer.innerHTML = '';
+
+  // 1. 加入 "Untagged" 特殊按鈕
+  const untaggedBtn = document.createElement('button');
+  untaggedBtn.className = 'tag-button';
+  untaggedBtn.innerText = 'Untagged';
+  // 為了區別，可以給它一點特別的樣式，這裡直接利用 selected 狀態
+  if (activeFilters.includes(UNTAGGED_KEY)) {
+    untaggedBtn.classList.add('selected');
+  }
+  untaggedBtn.addEventListener('click', () => {
+    toggleFilter(UNTAGGED_KEY);
+  });
+  tagFilterContainer.appendChild(untaggedBtn);
+
+  // 2. 加入一般標籤按鈕
   state.tags.forEach(tag => {
     const button = document.createElement('button');
     button.className = 'tag-button';
@@ -107,37 +122,67 @@ function populateTagFilterBar() {
     }
 
     button.addEventListener('click', () => {
-      if (activeFilters.includes(tag)) {
-        activeFilters = activeFilters.filter(f => f !== tag);
-        button.classList.remove('selected');
-      } else {
-        activeFilters.push(tag);
-        button.classList.add('selected');
-      }
-      refreshItemsList();
+      toggleFilter(tag);
     });
 
     tagFilterContainer.appendChild(button);
   });
 }
 
+/**
+ * 處理過濾器切換邏輯
+ * 為了避免 "Untagged" 與 "Has Tag" 邏輯衝突，我們採取互斥策略：
+ * 1. 點擊 Untagged -> 清除其他所有 Tag Filters
+ * 2. 點擊一般 Tag -> 清除 Untagged Filter
+ */
+function toggleFilter(filterKey) {
+  if (filterKey === UNTAGGED_KEY) {
+    if (activeFilters.includes(UNTAGGED_KEY)) {
+      // 如果已經是 Untagged 模式，再次點擊則取消，變回顯示全部
+      activeFilters = [];
+    } else {
+      // 進入 Untagged 模式，清空其他 Tag
+      activeFilters = [UNTAGGED_KEY];
+    }
+  } else {
+    // 點擊一般 Tag
+    // 如果當前是在 Untagged 模式，先退出該模式
+    if (activeFilters.includes(UNTAGGED_KEY)) {
+      activeFilters = [];
+    }
+
+    if (activeFilters.includes(filterKey)) {
+      activeFilters = activeFilters.filter(f => f !== filterKey);
+    } else {
+      activeFilters.push(filterKey);
+    }
+  }
+
+  // 重新渲染 Filter Bar (更新按鈕的 selected 狀態) 和列表
+  populateTagFilterBar();
+  refreshItemsList();
+}
+
 function getFilteredItems() {
   let filtered = state.items;
 
-  // 1. Tag Scope (Simplified: Always allow all, unless actively filtering)
-  // 這裡邏輯改為：如果不選 tag filter，就顯示全部。如果選了 tag filter，必須符合所有選中的 tag。
-
+  // 1. Tag Scope
   if (activeFilters.length > 0) {
-    filtered = filtered.filter(item =>
-      activeFilters.every(filterTag => item.tags && item.tags.includes(filterTag))
-    );
+    if (activeFilters.includes(UNTAGGED_KEY)) {
+      // 特殊邏輯：只顯示沒有 Tag 的項目
+      filtered = filtered.filter(item => !item.tags || item.tags.length === 0);
+    } else {
+      // 一般邏輯：顯示包含所有選中 Tag 的項目
+      filtered = filtered.filter(item =>
+        activeFilters.every(filterTag => item.tags && item.tags.includes(filterTag))
+      );
+    }
   }
 
   // 2. Actor Filter
   if (currentActorFilter) {
     filtered = filtered.filter(item => {
       const actors = item.actors || [];
-      // 這裡做模糊搜尋比較好用
       return actors.some(a => a.toLowerCase().includes(currentActorFilter.toLowerCase()));
     });
   }
@@ -177,7 +222,7 @@ function renderFilteredList() {
     if (actors.length > 0) {
       const itemActorSpan = document.createElement('span');
       itemActorSpan.className = 'item-actor';
-      itemActorSpan.innerText = `${actors.join(', ')}`; // Removed "Actors:" prefix for cleaner look
+      itemActorSpan.innerText = `${actors.join(', ')}`;
       textContainer.appendChild(itemActorSpan);
     }
 
