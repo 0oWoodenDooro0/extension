@@ -2,19 +2,20 @@
 import { state, saveData } from './store.js';
 
 // --- Local State for this view ---
-let currentTag = "All Items"; // 預設為 All Items
-let activeFilters = []; // 存放選中的標籤名稱，或是特殊的 "_UNTAGGED_"
+let currentTag = "All Items";
+let activeFilters = [];
 let currentActorFilter = "";
 
-const UNTAGGED_KEY = "_UNTAGGED_"; // 特殊的過濾 Key
+const UNTAGGED_KEY = "_UNTAGGED_";
 
 // --- DOM Elements ---
 let itemList, itemSearchInput, tagFilterContainer;
 let actorFilterContainer, actorFilterInput, actorFilterDatalist;
 let callbacks = {};
+let searchDebounceTimer = null; // 用於搜尋防抖
 
 /**
- * 初始化項目視圖 (綁定事件監聽器)
+ * 初始化項目視圖
  */
 export function initItemsView(injectedCallbacks) {
   callbacks = injectedCallbacks;
@@ -26,25 +27,29 @@ export function initItemsView(injectedCallbacks) {
   actorFilterInput = document.getElementById('actorFilterInput');
   actorFilterDatalist = document.getElementById('actorFilterDatalist');
 
-  // 綁定搜尋框事件
-  itemSearchInput.addEventListener('input', () => refreshItemsList());
+  // [優化 3] 搜尋防抖：延遲執行 refreshItemsList
+  itemSearchInput.addEventListener('input', () => {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      refreshItemsList();
+    }, 300); // 延遲 300ms
+  });
 
-  const clearSearchButton = document.getElementById('clearSearchButton');
-  clearSearchButton.addEventListener('click', () => {
+  document.getElementById('clearSearchButton').addEventListener('click', () => {
     itemSearchInput.value = '';
     refreshItemsList();
   });
 
-  // 綁定演員過濾事件
   actorFilterInput.addEventListener('input', (e) => {
     currentActorFilter = e.target.value.trim();
-    refreshItemsList();
+    refreshItemsList(); // Actor filter 通常選項較少，直接刷新尚可，也可加防抖
   });
 
-  // 綁定全域點擊以關閉右鍵選單
+  // [優化 1] 事件委派：統一在 itemList (父層) 監聽點擊
+  setupListEventDelegation();
+
   document.addEventListener('click', removeCustomContextMenu);
 
-  // 綁定工具列按鈕 (確保 HTML 中有這些 ID)
   const randomBtn = document.getElementById('randomButton');
   if (randomBtn) randomBtn.addEventListener('click', randomItem);
 
@@ -52,23 +57,50 @@ export function initItemsView(injectedCallbacks) {
   if (openAllBtn) openAllBtn.addEventListener('click', openAllItems);
 }
 
-/**
- * 顯示項目 (現在主要用於重置過濾器或初始化)
- * @param {String} tag - 永遠傳入 "All Items"
- */
+// [優化 1] 設置事件委派函數
+function setupListEventDelegation() {
+  // 左鍵點擊：開啟連結
+  itemList.addEventListener('click', (e) => {
+    const li = e.target.closest('.listItem');
+    if (li) {
+      // 獲取數據屬性中的 url (稍後在 render 時需加上 data-url)
+      const url = li.dataset.url;
+      if (url) browser.tabs.create({ url: url });
+    }
+  });
+
+  // 右鍵點擊：自定義選單
+  itemList.addEventListener('contextmenu', (e) => {
+    const li = e.target.closest('.listItem');
+    if (li) {
+      e.preventDefault();
+      removeCustomContextMenu();
+      const itemId = li.dataset.id; // 從 data-id 獲取 ID
+
+      const menu = createCustomContextMenu(itemId);
+      document.body.appendChild(menu);
+
+      // 簡單的邊界檢查
+      const menuHeight = menu.offsetHeight || 100;
+      const windowHeight = window.innerHeight;
+
+      let top = e.clientY;
+      if (e.clientY + menuHeight > windowHeight) {
+        top = e.clientY - menuHeight;
+      }
+      menu.style.top = `${top}px`;
+      menu.style.left = `${e.clientX}px`;
+    }
+  });
+}
+
 export function displayItemsByTag(tag) {
   currentTag = tag;
-
-  // 更新過濾器 UI
   populateTagFilterBar();
   populateActorFilterOptions();
-
   refreshItemsList();
 }
 
-/**
- * 重新渲染列表 (當數據變更或搜尋條件變更時呼叫)
- */
 export function refreshItemsList() {
   renderFilteredList();
 }
@@ -86,79 +118,63 @@ function populateActorFilterOptions() {
 
   if (actorFilterDatalist) {
     actorFilterDatalist.innerHTML = '';
+    // DocumentFragment 這裡也可以用，雖然影響較小
+    const fragment = document.createDocumentFragment();
     allActors.forEach(actor => {
       const option = document.createElement('option');
       option.value = actor;
-      actorFilterDatalist.appendChild(option);
+      fragment.appendChild(option);
     });
+    actorFilterDatalist.appendChild(fragment);
   }
 }
 
 function populateTagFilterBar() {
   if (!tagFilterContainer) return;
-
   tagFilterContainer.innerHTML = '';
 
-  // 1. 加入 "Untagged" 特殊按鈕
-  const untaggedBtn = document.createElement('button');
-  untaggedBtn.className = 'tag-button';
-  untaggedBtn.innerText = 'Untagged';
-  // 為了區別，可以給它一點特別的樣式，這裡直接利用 selected 狀態
-  if (activeFilters.includes(UNTAGGED_KEY)) {
-    untaggedBtn.classList.add('selected');
-  }
-  untaggedBtn.addEventListener('click', () => {
-    toggleFilter(UNTAGGED_KEY);
-  });
-  tagFilterContainer.appendChild(untaggedBtn);
+  const fragment = document.createDocumentFragment();
 
-  // 2. 加入一般標籤按鈕
+  // 1. Untagged 按鈕
+  const untaggedBtn = createFilterButton('Untagged', activeFilters.includes(UNTAGGED_KEY));
+  untaggedBtn.addEventListener('click', () => toggleFilter(UNTAGGED_KEY));
+  fragment.appendChild(untaggedBtn);
+
+  // 2. 一般標籤按鈕
   state.tags.forEach(tag => {
-    const button = document.createElement('button');
-    button.className = 'tag-button';
-    button.innerText = tag;
-    if (activeFilters.includes(tag)) {
-      button.classList.add('selected');
-    }
-
-    button.addEventListener('click', () => {
-      toggleFilter(tag);
-    });
-
-    tagFilterContainer.appendChild(button);
+    const button = createFilterButton(tag, activeFilters.includes(tag));
+    button.addEventListener('click', () => toggleFilter(tag));
+    fragment.appendChild(button);
   });
+
+  tagFilterContainer.appendChild(fragment);
 }
 
-/**
- * 處理過濾器切換邏輯
- * 為了避免 "Untagged" 與 "Has Tag" 邏輯衝突，我們採取互斥策略：
- * 1. 點擊 Untagged -> 清除其他所有 Tag Filters
- * 2. 點擊一般 Tag -> 清除 Untagged Filter
- */
+function createFilterButton(text, isSelected) {
+  const button = document.createElement('button');
+  button.className = 'tag-button';
+  button.innerText = text;
+  if (isSelected) button.classList.add('selected');
+  return button;
+}
+
 function toggleFilter(filterKey) {
   if (filterKey === UNTAGGED_KEY) {
     if (activeFilters.includes(UNTAGGED_KEY)) {
-      // 如果已經是 Untagged 模式，再次點擊則取消，變回顯示全部
       activeFilters = [];
     } else {
-      // 進入 Untagged 模式，清空其他 Tag
       activeFilters = [UNTAGGED_KEY];
     }
   } else {
-    // 點擊一般 Tag
-    // 如果當前是在 Untagged 模式，先退出該模式
     if (activeFilters.includes(UNTAGGED_KEY)) {
       activeFilters = [];
     }
-
     if (activeFilters.includes(filterKey)) {
       activeFilters = activeFilters.filter(f => f !== filterKey);
     } else {
       activeFilters.push(filterKey);
     }
   }
-
-  // 重新渲染 Filter Bar (更新按鈕的 selected 狀態) 和列表
   populateTagFilterBar();
   refreshItemsList();
 }
@@ -169,10 +185,8 @@ function getFilteredItems() {
   // 1. Tag Scope
   if (activeFilters.length > 0) {
     if (activeFilters.includes(UNTAGGED_KEY)) {
-      // 特殊邏輯：只顯示沒有 Tag 的項目
       filtered = filtered.filter(item => !item.tags || item.tags.length === 0);
     } else {
-      // 一般邏輯：顯示包含所有選中 Tag 的項目
       filtered = filtered.filter(item =>
         activeFilters.every(filterTag => item.tags && item.tags.includes(filterTag))
       );
@@ -181,9 +195,11 @@ function getFilteredItems() {
 
   // 2. Actor Filter
   if (currentActorFilter) {
+    // 預先轉小寫，雖然 JS 引擎很快，但在 filter 迴圈外處理固定的字串是好習慣
+    const filterLower = currentActorFilter.toLowerCase();
     filtered = filtered.filter(item => {
       const actors = item.actors || [];
-      return actors.some(a => a.toLowerCase().includes(currentActorFilter.toLowerCase()));
+      return actors.some(a => a.toLowerCase().includes(filterLower));
     });
   }
 
@@ -191,6 +207,7 @@ function getFilteredItems() {
   const searchTerm = itemSearchInput.value.toLowerCase();
   if (searchTerm) {
     filtered = filtered.filter(item => {
+      // 這裡如果 item 非常多，可以考慮在 item 物件中緩存一個 "searchString" 屬性
       const titleMatch = item.title.toLowerCase().includes(searchTerm);
       const urlMatch = item.url.toLowerCase().includes(searchTerm);
       const actors = item.actors || [];
@@ -202,15 +219,22 @@ function getFilteredItems() {
 }
 
 function renderFilteredList() {
-  let itemsToDisplay = getFilteredItems();
-  // 依加入時間反序排列 (新的在上面)
+  const itemsToDisplay = getFilteredItems();
   itemsToDisplay.sort((a, b) => b.addDate - a.addDate);
 
   itemList.innerHTML = '';
+
+  // [優化 2] 使用 DocumentFragment 批次寫入 DOM
+  const fragment = document.createDocumentFragment();
+
   itemsToDisplay.forEach(item => {
     const listItem = document.createElement('li');
     listItem.className = "listItem";
     listItem.id = `item-${item.id}`;
+
+    // [重要] 將資料綁定在 dataset，供事件委派使用
+    listItem.dataset.id = item.id;
+    listItem.dataset.url = item.url;
 
     const textContainer = document.createElement('div');
     const itemTitleSpan = document.createElement('span');
@@ -232,33 +256,16 @@ function renderFilteredList() {
       const itemImage = document.createElement('img');
       itemImage.className = 'item-image';
       itemImage.src = item.imageUrl;
+      itemImage.loading = "lazy"; // [額外優化] 圖片懶加載
       itemImage.onerror = (e) => { e.target.style.display = 'none'; };
       listItem.appendChild(itemImage);
     }
 
-    // Left Click: Open Tab
-    listItem.addEventListener('click', () => {
-      browser.tabs.create({ url: item.url });
-    });
-
-    // Right Click: Context Menu
-    listItem.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      removeCustomContextMenu();
-      const menu = createCustomContextMenu(item.id);
-      document.body.appendChild(menu);
-
-      const menuHeight = menu.offsetHeight;
-      const windowHeight = window.innerHeight;
-      if (e.clientY + menuHeight > windowHeight) {
-        menu.style.top = `${e.clientY - menuHeight}px`;
-      } else {
-        menu.style.top = `${e.clientY}px`;
-      }
-      menu.style.left = `${e.clientX}px`;
-    });
-    itemList.appendChild(listItem);
+    // 移除了個別的 addEventListener
+    fragment.appendChild(listItem);
   });
+
+  itemList.appendChild(fragment);
 }
 
 function createCustomContextMenu(itemId) {
