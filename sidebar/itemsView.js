@@ -2,24 +2,23 @@
 import { state, saveData } from './store.js';
 
 // --- Local State for this view ---
-let currentTag = null;
+let currentTag = "All Items"; // 預設為 All Items
 let activeFilters = [];
 let currentActorFilter = "";
 
 // --- DOM Elements ---
-let itemList, itemTitle, itemSearchInput, tagFilterContainer;
+let itemList, itemSearchInput, tagFilterContainer;
 let actorFilterContainer, actorFilterInput, actorFilterDatalist;
-let callbacks = {}; // 存放外部傳入的回呼函數 (如 onEditItem)
+let callbacks = {};
 
 /**
  * 初始化項目視圖 (綁定事件監聽器)
- * @param {Object} injectedCallbacks - { onEditItem: function(itemId) }
  */
 export function initItemsView(injectedCallbacks) {
   callbacks = injectedCallbacks;
 
   itemList = document.getElementById('itemList');
-  itemTitle = document.getElementById('itemTitle');
+  // Removed: itemTitle = document.getElementById('itemTitle'); 
   itemSearchInput = document.getElementById('itemSearchInput');
   tagFilterContainer = document.getElementById('tagFilterContainer');
   actorFilterContainer = document.getElementById('actorFilterContainer');
@@ -44,34 +43,25 @@ export function initItemsView(injectedCallbacks) {
   // 綁定全域點擊以關閉右鍵選單
   document.addEventListener('click', removeCustomContextMenu);
 
-  // 綁定工具列按鈕
-  document.getElementById('randomButton').addEventListener('click', randomItem);
-  document.getElementById('openAllButton').addEventListener('click', openAllItems);
+  // 綁定工具列按鈕 (確保 HTML 中有這些 ID)
+  const randomBtn = document.getElementById('randomButton');
+  if (randomBtn) randomBtn.addEventListener('click', randomItem);
+
+  // Open All 被移除了或需要移到其他地方，這裡暫時保留邏輯，如果 HTML 有按鈕就會運作
+  const openAllBtn = document.getElementById('openAllButton');
+  if (openAllBtn) openAllBtn.addEventListener('click', openAllItems);
 }
 
 /**
- * 顯示特定標籤的項目
- * @param {String} tag - 標籤名稱
+ * 顯示項目 (現在主要用於重置過濾器或初始化)
+ * @param {String} tag - 永遠傳入 "All Items"
  */
 export function displayItemsByTag(tag) {
   currentTag = tag;
-  itemTitle.innerText = tag;
 
-  // 強制重置過濾器，確保切換到 "All Items" 或其他標籤時是乾淨的
-  currentActorFilter = "";
-  if (actorFilterInput) actorFilterInput.value = "";
-  activeFilters = [];
-
-  // 根據標籤類型顯示/隱藏過濾器 UI
-  if (tag === "All Items") {
-    tagFilterContainer.style.display = 'flex';
-    populateTagFilterBar();
-    actorFilterContainer.style.display = 'block';
-    populateActorFilterOptions();
-  } else {
-    tagFilterContainer.style.display = 'none';
-    actorFilterContainer.style.display = 'none';
-  }
+  // 更新過濾器 UI
+  populateTagFilterBar();
+  populateActorFilterOptions();
 
   refreshItemsList();
 }
@@ -80,9 +70,6 @@ export function displayItemsByTag(tag) {
  * 重新渲染列表 (當數據變更或搜尋條件變更時呼叫)
  */
 export function refreshItemsList() {
-  // 如果當前沒有選中標籤（例如在 TagsView），就不做渲染
-  if (!currentTag) return;
-
   renderFilteredList();
 }
 
@@ -97,15 +84,19 @@ function populateActorFilterOptions() {
   });
   const allActors = [...allActorsSet].sort();
 
-  actorFilterDatalist.innerHTML = '';
-  allActors.forEach(actor => {
-    const option = document.createElement('option');
-    option.value = actor;
-    actorFilterDatalist.appendChild(option);
-  });
+  if (actorFilterDatalist) {
+    actorFilterDatalist.innerHTML = '';
+    allActors.forEach(actor => {
+      const option = document.createElement('option');
+      option.value = actor;
+      actorFilterDatalist.appendChild(option);
+    });
+  }
 }
 
 function populateTagFilterBar() {
+  if (!tagFilterContainer) return;
+
   tagFilterContainer.innerHTML = '';
   state.tags.forEach(tag => {
     const button = document.createElement('button');
@@ -115,16 +106,15 @@ function populateTagFilterBar() {
       button.classList.add('selected');
     }
 
-    // --- 修正處：增加按鈕樣式切換邏輯 ---
     button.addEventListener('click', () => {
       if (activeFilters.includes(tag)) {
         activeFilters = activeFilters.filter(f => f !== tag);
-        button.classList.remove('selected'); // 立即移除樣式
+        button.classList.remove('selected');
       } else {
         activeFilters.push(tag);
-        button.classList.add('selected');    // 立即新增樣式
+        button.classList.add('selected');
       }
-      refreshItemsList(); // 重新過濾列表
+      refreshItemsList();
     });
 
     tagFilterContainer.appendChild(button);
@@ -134,29 +124,25 @@ function populateTagFilterBar() {
 function getFilteredItems() {
   let filtered = state.items;
 
-  // 1. Tag Scope
-  if (currentTag === "Untagged") {
-    filtered = state.items.filter(item => !item.tags || item.tags.length === 0);
-  } else if (currentTag !== "All Items") {
-    filtered = state.items.filter(item => item.tags && item.tags.includes(currentTag));
-  }
+  // 1. Tag Scope (Simplified: Always allow all, unless actively filtering)
+  // 這裡邏輯改為：如果不選 tag filter，就顯示全部。如果選了 tag filter，必須符合所有選中的 tag。
 
-  // 2. Sub-Tag Filters (in All Items)
   if (activeFilters.length > 0) {
     filtered = filtered.filter(item =>
       activeFilters.every(filterTag => item.tags && item.tags.includes(filterTag))
     );
   }
 
-  // 3. Actor Filter
-  if (currentTag === "All Items" && currentActorFilter) {
+  // 2. Actor Filter
+  if (currentActorFilter) {
     filtered = filtered.filter(item => {
       const actors = item.actors || [];
-      return actors.includes(currentActorFilter);
+      // 這裡做模糊搜尋比較好用
+      return actors.some(a => a.toLowerCase().includes(currentActorFilter.toLowerCase()));
     });
   }
 
-  // 4. Search Text
+  // 3. Search Text
   const searchTerm = itemSearchInput.value.toLowerCase();
   if (searchTerm) {
     filtered = filtered.filter(item => {
@@ -172,7 +158,8 @@ function getFilteredItems() {
 
 function renderFilteredList() {
   let itemsToDisplay = getFilteredItems();
-  itemsToDisplay.sort((a, b) => a.addDate - b.addDate);
+  // 依加入時間反序排列 (新的在上面)
+  itemsToDisplay.sort((a, b) => b.addDate - a.addDate);
 
   itemList.innerHTML = '';
   itemsToDisplay.forEach(item => {
@@ -190,7 +177,7 @@ function renderFilteredList() {
     if (actors.length > 0) {
       const itemActorSpan = document.createElement('span');
       itemActorSpan.className = 'item-actor';
-      itemActorSpan.innerText = `Actors: ${actors.join(', ')}`;
+      itemActorSpan.innerText = `${actors.join(', ')}`; // Removed "Actors:" prefix for cleaner look
       textContainer.appendChild(itemActorSpan);
     }
 
@@ -248,8 +235,8 @@ function createCustomContextMenu(itemId) {
       const itemIndex = state.items.findIndex(i => i.id === itemId);
       if (itemIndex > -1) {
         state.items.splice(itemIndex, 1);
-        saveData(); // Save to store
-        refreshItemsList(); // Re-render this view
+        saveData();
+        refreshItemsList();
       }
     }
   });
@@ -271,7 +258,6 @@ function openAllItems() {
       itemsToOpen.forEach(item => {
         browser.tabs.create({ url: item.url, active: false });
       });
-      // Clear search after open? Optional. Kept simple here.
     }
   }
 }

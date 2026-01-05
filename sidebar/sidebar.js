@@ -1,12 +1,10 @@
 import { loadData } from './store.js';
-import { renderTagsList } from './tagsView.js';
 import { initItemsView, displayItemsByTag, refreshItemsList } from './itemsView.js';
 import { initAddItemView, showAddItemView, isEditingMode } from './addItemView.js';
 import { initManageTagsView, showManageTagsView, displayManageTagList } from './manageTagsView.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
   // --- Elements (Layout) ---
-  const tagsView = document.getElementById('tagsView');
   const itemsView = document.getElementById('itemsView');
   const addItemView = document.getElementById('addItemView');
   const manageTagsView = document.getElementById('manageTagsView');
@@ -17,11 +15,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const exportButton = document.getElementById('exportButton');
   const importButton = document.getElementById('importButton');
   const fileInput = document.getElementById('fileInput');
-  const backButton = document.getElementById('backButton');
 
   // --- Global Controller State ---
-  let currentViewName = 'tags'; // 'tags', 'items', 'add', 'manage'
-  let currentTag = null; // 紀錄當前正在瀏覽的標籤 (如果有的話)
+  let currentViewName = 'items'; // 'items', 'add', 'manage'
 
   // --- Initialization ---
 
@@ -43,7 +39,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 3. 初始化標籤管理視圖
   initManageTagsView({
     onClose: () => {
-      displayTags(); // 關閉管理介面，回到首頁
+      displayMainLibrary(); // 關閉管理介面，回到主頁
     }
   });
 
@@ -59,10 +55,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     showAddItemView(null); // 進入新增模式
   });
 
-  backButton.addEventListener('click', () => {
-    displayTags();
-  });
-
   exportButton.addEventListener('click', exportData);
   importButton.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', importData);
@@ -71,44 +63,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   // --- Navigation Logic ---
 
   function showView(viewToShow) {
-    [tagsView, itemsView, addItemView, manageTagsView].forEach(view => {
-      view.style.display = view === viewToShow ? 'block' : 'none';
+    [itemsView, addItemView, manageTagsView].forEach(view => {
+      if (view) {
+        // [重要修改] 使用 'flex' 而不是 'block'，以確保 CSS flex-grow 生效
+        view.style.display = view === viewToShow ? 'flex' : 'none';
+      }
     });
 
-    if (viewToShow === tagsView) currentViewName = 'tags';
-    else if (viewToShow === itemsView) currentViewName = 'items';
+    if (viewToShow === itemsView) currentViewName = 'items';
     else if (viewToShow === addItemView) currentViewName = 'add';
     else if (viewToShow === manageTagsView) currentViewName = 'manage';
   }
 
-  function displayTags() {
-    showView(tagsView);
-    currentTag = null;
-    renderTagsList((selectedTag) => {
-      // Callback: 當使用者在標籤列表點擊某個標籤
-      currentTag = selectedTag;
-      showView(itemsView);
-      displayItemsByTag(selectedTag);
-    });
+  function displayMainLibrary() {
+    showView(itemsView);
+    displayItemsByTag("All Items");
   }
 
   function handleAddEditFinished() {
-    // 邏輯：如果是「編輯」現有項目，通常希望回到原本的列表
-    // 如果是「新增」項目，原本的邏輯是回到 Tags 首頁，但也可以根據需求調整
-    if (isEditingMode() && currentTag) {
-      // 編輯模式且原本就在某個 Tag 下 -> 回到該 Tag 列表
-      showView(itemsView);
-      displayItemsByTag(currentTag);
-    } else {
-      // 新增模式或原本不在特定 Tag 下 -> 回到首頁
-      displayTags();
-    }
+    displayMainLibrary();
   }
 
   // --- Import/Export Logic ---
-  // (這部分比較獨立，暫時保留在 Controller，如果要再拆分可以移到 utils.js)
   function exportData() {
-    // 為了確保拿到最新資料，這裡可以再呼叫一次 browser.storage，或者直接用 store.js 的 export
     import('./store.js').then(({ state }) => {
       const dataToExport = { items: state.items || [], tags: state.tags || [] };
       const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
@@ -132,7 +109,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 state.items = importedData.items;
                 state.tags = importedData.tags;
                 saveData();
-                displayTags();
+                displayMainLibrary();
               });
             }
           } else { alert("Invalid format."); }
@@ -146,13 +123,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // --- Storage Listener ---
   browser.storage.onChanged.addListener((changes, area) => {
     if (area === 'local') {
-      // 當資料變更時，通知當前活躍的視圖進行更新
       if (currentViewName === 'manage') {
         displayManageTagList();
-      } else if (currentViewName === 'items' && currentTag) {
+      } else if (currentViewName === 'items') {
         refreshItemsList();
-      } else if (currentViewName === 'tags') {
-        displayTags(); // 雖然 displayTags 會重繪，但在 tagsView 其實只需要呼叫 renderTagsList
       }
     }
   });
@@ -160,7 +134,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // --- Initial Load ---
   try {
     await loadData();
-    displayTags();
+    displayMainLibrary();
   } catch (e) {
     console.error("Failed to load data:", e);
   }

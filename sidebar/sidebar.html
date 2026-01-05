@@ -5,28 +5,68 @@
     <title>Collections</title>
     <style>
         :root {
-            --toolbar-height: auto;
             --list-padding: 10px;
         }
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+        /* 1. 鎖定最外層，禁止 Body 捲動 */
+        html, body {
+            height: 100vh; /* 強制視窗高度 */
             margin: 0;
+            padding: 0;
+            overflow: hidden; /* 隱藏 Body 的捲軸 */
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             user-select: none;
         }
 
+        /* 2. 視圖容器：佔滿 100% 高度，使用上下排列的 Flex */
         .view {
-            display: none;
+            display: none; /* JS 會切換 display */
+            flex-direction: column;
+            height: 100%; /* 繼承 Body 的高度 */
+            width: 100%;
+            overflow: hidden; /* 確保 View 本身不捲動 */
         }
 
-        .list {
-            list-style: none;
+        /* 3. 工具列：固定高度，不可壓縮 */
+        .toolbar {
+            flex-shrink: 0;
+            background-color: white;
+            border-bottom: 1px solid #eee;
+            padding: 10px;
+            z-index: 10;
+        }
+
+        /* 4. 清單區域：自動填滿剩餘空間，並產生自己的捲軸 */
+        .list, .form-container {
+            flex-grow: 1;
+            overflow-y: auto; /* 捲軸出現在這裡 */
+            min-height: 0;    /* [關鍵] 允許 Flex 子元素縮小，這能修復捲軸綁定問題 */
             padding: var(--list-padding);
             margin: 0;
-            overflow-y: auto;
-            max-height: calc(100vh - var(--toolbar-height) - 2 * var(--list-padding));
         }
 
+        /* 美化捲軸 (Chrome/Safari/New Edge) */
+        ::-webkit-scrollbar {
+            width: 10px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #ccc; 
+            border-radius: 5px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #999; 
+        }
+
+        /* Firefox 捲軸樣式 */
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: #ccc #f1f1f1;
+        }
+
+        /* --- 以下為元件樣式 (保持不變) --- */
         .listItem {
             padding: 8px;
             border-bottom: 1px solid #eee;
@@ -35,14 +75,12 @@
             align-items: center;
             gap: 10px;
         }
-
         .listItem > div {
             display: flex;
             flex-direction: column;
             flex-grow: 1;
             min-width: 0;
         }
-
         .listItem .item-title {
             display: -webkit-box;
             -webkit-line-clamp: 3;
@@ -53,13 +91,11 @@
             max-height: 4.2em;
             font-weight: 500;
         }
-
         .listItem .item-actor {
             font-size: 0.85em;
             color: #666;
             margin-top: 4px;
         }
-        
         .listItem .item-image {
             border-radius: 4px;
             background-color: #f0f0f0;
@@ -69,7 +105,6 @@
             width: auto;
             height: auto;
         }
-
         .listItem:hover {
             background-color: #f0f0f0;
         }
@@ -78,38 +113,14 @@
             transition: background-color 0.3s ease-in-out;
         }
 
-        .toolbar {
-            position: sticky;
-            top: 0;
-            z-index: 10;
-            padding: 10px;
-            background-color: white;
-            border-bottom: 1px solid #eee;
-        }
-
-        .toolbar h3 {
-            margin: 10px 0 0;
-            padding: 0;
-        }
-        
-        .toolbar .button-group-top {
+        /* Toolbar Buttons */
+        .button-group-top {
              display: flex;
              flex-wrap: wrap;
              gap: 8px;
+             margin-bottom: 8px;
         }
-
-        .button-group {
-            margin-bottom: 10px;
-        }
-        
-        .button-group .button-row {
-            display: flex;
-            gap: 8px;
-        }
-        
-        .button-group .spacer {
-            flex-grow: 1;
-        }
+        .spacer { flex-grow: 1; }
         
         button {
             padding: 6px 12px;
@@ -119,25 +130,19 @@
             cursor: pointer;
             white-space: nowrap;
         }
-
-        button:hover {
-            background-color: #eee;
-        }
-        
+        button:hover { background-color: #eee; }
         .button-danger {
             background-color: #e53e3e;
             color: white;
             border-color: #c53030;
         }
-        .button-danger:hover {
-            background-color: #c53030;
-        }
+        .button-danger:hover { background-color: #c53030; }
 
+        /* Inputs */
         .search-container {
             position: relative;
-            margin-top: 10px;
+            margin-bottom: 8px;
         }
-
         #itemSearchInput {
             width: 100%;
             padding: 6px 24px 6px 8px;
@@ -145,7 +150,6 @@
             border: 1px solid #ccc;
             border-radius: 4px;
         }
-
         #clearSearchButton {
             position: absolute;
             right: 5px;
@@ -158,24 +162,17 @@
             padding: 0 4px;
             color: #888;
         }
-        #clearSearchButton:hover {
-            color: #333;
-        }
         
         #tagFilterContainer {
-            margin-top: 10px;
             display: flex;
             flex-wrap: wrap;
-            gap: 8px;
-        }
-
-        #actorFilterContainer {
-            margin-top: 10px;
-            display: none; /* Hidden by default, shown in All Items */
+            gap: 6px;
+            margin-bottom: 8px;
+            max-height: 60px;
+            overflow-y: auto;
         }
         
-        /* Styled input for actor filter */
-        #actorFilterInput {
+        #actorFilterInput, .form-group input {
             width: 100%;
             padding: 6px;
             box-sizing: border-box;
@@ -183,6 +180,7 @@
             border: 1px solid #ccc;
         }
 
+        /* Context Menu */
         #customContextMenu {
             position: fixed;
             z-index: 1000;
@@ -192,34 +190,18 @@
             border-radius: 4px;
             padding: 5px 0;
         }
-
         .context-menu-item {
             padding: 8px 15px;
             cursor: pointer;
         }
+        .context-menu-item:hover { background-color: #f0f0f0; }
 
-        .context-menu-item:hover {
-            background-color: #f0f0f0;
-        }
-
-        /* Add/Edit View Styles */
-        .form-container {
-            padding: 10px;
-        }
-        .form-group {
-            margin-bottom: 15px;
-        }
+        /* Forms */
+        .form-group { margin-bottom: 15px; }
         .form-group label {
             display: block;
             margin-bottom: 5px;
             font-weight: bold;
-        }
-        .form-group input {
-            width: 100%;
-            padding: 8px;
-            box-sizing: border-box;
-            border: 1px solid #ccc;
-            border-radius: 4px;
         }
         .tag-selector {
             display: flex;
@@ -232,12 +214,12 @@
             overflow-y: auto;
         }
         .tag-button {
-            padding: 4px 8px;
+            padding: 3px 8px;
             border: 1px solid #ddd;
             border-radius: 12px;
             cursor: pointer;
             background-color: #f8f8f8;
-            font-size: 12px;
+            font-size: 11px;
             display: flex;
             align-items: center;
             gap: 5px;
@@ -258,30 +240,19 @@
             gap: 5px;
             border: 1px solid #ccc;
         }
-        .actor-chip .remove-actor {
-            cursor: pointer;
-            font-weight: bold;
-            color: #666;
-            padding: 0 2px;
-        }
-        .actor-chip .remove-actor:hover {
-            color: red;
-        }
-
         .view-footer {
             padding: 10px;
             border-top: 1px solid #eee;
             display: flex;
             gap: 10px;
             justify-content: flex-end;
+            background-color: white; /* 確保 footer 不透明 */
         }
         .view-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-
-        /* Manage Tags View Styles */
         .manage-tag-list {
             list-style: none;
             padding: 0;
@@ -293,70 +264,44 @@
             padding: 8px;
             border-bottom: 1px solid #eee;
         }
-        .manage-tag-item.dragging {
-            opacity: 0.5;
-        }
-        .manage-tag-item.drag-over {
-            background-color: #e0f0ff;
-        }
         .drag-handle {
             cursor: move;
             margin-right: 10px;
             color: #888;
         }
-        .drag-handle::before {
-            content: '☰';
-        }
-        .tag-name {
-            flex-grow: 1;
-        }
-        .tag-actions button {
-            margin-left: 5px;
-        }
+        .drag-handle::before { content: '☰'; }
+        .tag-name { flex-grow: 1; }
+        .tag-actions button { margin-left: 5px; }
     </style>
 </head>
 <body>
 
-<!-- Tags View (Main View) -->
-<div id="tagsView" class="view">
-    <div class="toolbar">
-        <div class="button-group-top">
-            <button id="manageTagsButton">Manage Tags</button>
-            <button id="addItemButton">Add Item</button>
-            <span class="spacer"></span>
-            <button id="exportButton">Export</button>
-            <button id="importButton">Import</button>
-            <input id="fileInput" type="file" style="display: none"/>
-        </div>
-    </div>
-    <ul id="tagList" class="list"></ul>
-</div>
-
-<!-- Items View -->
+<!-- Items View (Default) -->
 <div id="itemsView" class="view">
     <div class="toolbar">
-        <div class="button-group">
-            <div class="button-row">
-                <button id="backButton">Back</button>
-                <span class="spacer"></span>
-                <button id="randomButton">Random</button>
-                <button id="openAllButton">Open All</button>
-            </div>
+        <div class="button-group-top">
+            <button id="addItemButton" title="Add current tab">Add</button>
+            <button id="randomButton">Random</button>
+            <span class="spacer"></span>
+            <button id="manageTagsButton">Tags</button>
+            <button id="exportButton">Exp</button>
+            <button id="importButton">Imp</button>
+            <input id="fileInput" type="file" style="display: none"/>
         </div>
+        
         <div class="search-container">
-            <input type="search" id="itemSearchInput" placeholder="Search items or actors...">
+            <input type="search" id="itemSearchInput" placeholder="Search...">
             <button id="clearSearchButton" title="Clear search">&times;</button>
         </div>
+        
         <div id="tagFilterContainer"></div>
         
-        <!-- Modified Actor Filter Container -->
         <div id="actorFilterContainer">
-            <input type="text" id="actorFilterInput" list="actorFilterDatalist" placeholder="Filter by Actor (Type to search)">
+            <input type="text" id="actorFilterInput" list="actorFilterDatalist" placeholder="Filter Actor...">
             <datalist id="actorFilterDatalist"></datalist>
         </div>
-        
-        <h3 id="itemTitle"></h3>
     </div>
+    <!-- List Container: This is what scrolls -->
     <ul id="itemList" class="list"></ul>
 </div>
 
@@ -382,7 +327,7 @@
         <div class="form-group">
             <label for="itemActorInput">Actors</label>
             <div style="display: flex; gap: 5px; margin-bottom: 5px;">
-                <input type="text" id="itemActorInput" list="actorSuggestions" placeholder="Type name and press Enter or Add" style="flex-grow: 1;">
+                <input type="text" id="itemActorInput" list="actorSuggestions" placeholder="Name..." style="flex-grow: 1;">
                 <datalist id="actorSuggestions"></datalist>
                 <button id="addActorButton" type="button">Add</button>
             </div>
