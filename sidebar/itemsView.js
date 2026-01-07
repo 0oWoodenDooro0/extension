@@ -60,12 +60,23 @@ export function initItemsView(injectedCallbacks) {
 // [優化 1] 設置事件委派函數
 function setupListEventDelegation() {
   // 左鍵點擊：開啟連結
-  itemList.addEventListener('click', (e) => {
+  // [修改] 改為 async 以便等待 tabs.query
+  itemList.addEventListener('click', async (e) => {
     const li = e.target.closest('.listItem');
     if (li) {
-      // 獲取數據屬性中的 url (稍後在 render 時需加上 data-url)
       const url = li.dataset.url;
-      if (url) browser.tabs.create({ url: url });
+      if (url) {
+        // 獲取當前分頁資訊
+        const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+        const currentTab = tabs[0];
+
+        // 在當前分頁的下一個位置開啟，並設定 openerTabId 建立關聯
+        browser.tabs.create({
+          url: url,
+          index: currentTab ? currentTab.index + 1 : undefined,
+          openerTabId: currentTab ? currentTab.id : undefined
+        });
+      }
     }
   });
 
@@ -303,22 +314,42 @@ function removeCustomContextMenu() {
   if (existingMenu) existingMenu.remove();
 }
 
-function openAllItems() {
+// [修改] 讓 Open All 也在目前分頁後依序開啟
+async function openAllItems() {
   const itemsToOpen = getFilteredItems();
   if (itemsToOpen.length > 0) {
     if (confirm(`Open ${itemsToOpen.length} tabs?`)) {
-      itemsToOpen.forEach(item => {
-        browser.tabs.create({ url: item.url, active: false });
+      const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+      const currentTab = tabs[0];
+      let startIndex = currentTab ? currentTab.index + 1 : undefined;
+
+      itemsToOpen.forEach((item, i) => {
+        browser.tabs.create({
+          url: item.url,
+          active: false,
+          // 如果有找到當前分頁，就依序 +0, +1, +2 排下去，否則就預設(排最後)
+          index: startIndex !== undefined ? startIndex + i : undefined,
+          openerTabId: currentTab ? currentTab.id : undefined
+        });
       });
     }
   }
 }
 
-function randomItem() {
+// [修改] 讓 Random 也在目前分頁旁開啟
+async function randomItem() {
   const itemsToChooseFrom = getFilteredItems();
   if (itemsToChooseFrom.length > 0) {
     const randomItem = itemsToChooseFrom[Math.floor(Math.random() * itemsToChooseFrom.length)];
-    browser.tabs.create({ url: randomItem.url });
+
+    const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+    const currentTab = tabs[0];
+
+    browser.tabs.create({
+      url: randomItem.url,
+      index: currentTab ? currentTab.index + 1 : undefined,
+      openerTabId: currentTab ? currentTab.id : undefined
+    });
 
     const listItem = document.getElementById(`item-${randomItem.id}`);
     if (listItem) {

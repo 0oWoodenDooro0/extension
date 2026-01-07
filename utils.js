@@ -21,16 +21,16 @@ export function addSearchShortcut() {
   browser.contextMenus.onClicked.addListener((info, tab) => {
     if (info.menuItemId === "searchOnMis") {
       const query = info.selectionText.trim();
-      searchOnMissav(query)
+      searchOnMissav(query, tab)
     } else if (info.menuItemId === "searchOnSiro") {
       const query = info.selectionText.trim();
-      searchOnSiro(query)
+      searchOnSiro(query, tab)
     } else if (info.menuItemId === "searchOnVida") {
       const query = info.selectionText.trim()
-      searchOnVida(query)
+      searchOnVida(query, tab)
     } else if (info.menuItemId === "searchOnVidc") {
       const query = info.selectionText.trim()
-      searchOnVidc(query)
+      searchOnVidc(query, tab)
     }
   });
 
@@ -44,38 +44,38 @@ export function addSearchShortcut() {
       }, (selection) => {
         const query = selection[0].result.trim();
         if (command === "search_on_mis") {
-          searchOnMissav(query)
+          searchOnMissav(query, tab)
         } else if (command === "search_on_siro") {
-          searchOnSiro(query)
+          searchOnSiro(query, tab)
         }
       });
     });
   })
 
-  function searchOnMissav(query) {
+  function searchOnMissav(query, currentTab) {
     const data = query.match(/([a-zA-Z]+)(0+)?-?(\d{3,})/)
     let id = (data === null) ? query : data[1] + "-" + data[3]
     const misSearchUrl = `https://missav.ai/search/${encodeURIComponent(id)}`;
-    browser.tabs.create({ url: misSearchUrl });
+    browser.tabs.create({ url: misSearchUrl, index: currentTab ? currentTab.index + 1 : undefined, openerTabId: currentTab ? currentTab.id : undefined });
   }
 
-  function searchOnSiro(query) {
+  function searchOnSiro(query, currentTab) {
     const siroSearchUrl = `https://sirowiki.com/search/?keyword=${encodeURIComponent(query)}`;
-    browser.tabs.create({ url: siroSearchUrl });
+    browser.tabs.create({ url: siroSearchUrl, index: currentTab ? currentTab.index + 1 : undefined, openerTabId: currentTab ? currentTab.id : undefined });
   }
 
-  function searchOnVida(query) {
+  function searchOnVida(query, currentTab) {
     const data = query.match(/([a-zA-Z]+)(0+)?-?(\d{3,})/)
     let id = (data === null) ? query : data[1] + " " + data[3]
     const vidaSearchUrl = `https://video.dmm.co.jp/av/list/?key=${encodeURIComponent(id)}`;
-    browser.tabs.create({ url: vidaSearchUrl });
+    browser.tabs.create({ url: vidaSearchUrl, index: currentTab ? currentTab.index + 1 : undefined, openerTabId: currentTab ? currentTab.id : undefined });
   }
 
-  function searchOnVidc(query) {
+  function searchOnVidc(query, currentTab) {
     const data = query.match(/([a-zA-Z]+)(0+)?-?(\d{3,})/)
     let id = (data === null) ? query : data[1] + " " + data[3]
     const vidcSearchUrl = `https://video.dmm.co.jp/amateur/list/?key=${encodeURIComponent(id)}`;
-    browser.tabs.create({ url: vidcSearchUrl });
+    browser.tabs.create({ url: vidcSearchUrl, index: currentTab ? currentTab.index + 1 : undefined, openerTabId: currentTab ? currentTab.id : undefined });
   }
 }
 
