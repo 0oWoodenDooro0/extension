@@ -16,9 +16,18 @@ function formatQuery(query, engine) {
     console.log(`[formatQuery] Configured Replacement: "${engine.queryReplacement}"`);
     const regex = new RegExp(engine.queryRegex);
     console.log(`[formatQuery] Compiled RegExp Object:`, regex);
-    const result = query.replace(regex, engine.queryReplacement);
-    console.log(`[formatQuery] Formatting Result: "${result}"`);
-    return result;
+    
+    // Extract the matched portion first to discard any surrounding unneeded text (like spaces or extra words)
+    const match = query.match(regex);
+    if (match) {
+      console.log(`[formatQuery] Found matched portion within selection: "${match[0]}"`);
+      const result = match[0].replace(regex, engine.queryReplacement);
+      console.log(`[formatQuery] Formatting Result: "${result}"`);
+      return result;
+    } else {
+      console.log(`[formatQuery] Selected text does not match the regex pattern. Returning original text.`);
+      return query;
+    }
   } catch (error) {
     console.error(`[formatQuery] Regex replacement error for engine "${engine.id}":`, error);
     return query;
