@@ -74,7 +74,6 @@ The Search Shortcuts settings allow you to select text on any webpage, right-cli
 | Shortcut Title | URL Template | Custom Regex (Optional) | Regex Replacement (Optional) | Example Input Selection | Example Formatted Search URL |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Google Search** | `https://www.google.com/search?q={query}` | *(None)* | *(None)* | `Antigravity AI` | `https://www.google.com/search?q=Antigravity%20AI` |
-| **Clean ID Search** | `https://example.com/item/{id}` | `(\w+)` | `$1` | `MC-123` | `https://example.com/item/MC-123` |
 
 *Use `{id}` or `{query}` as template placeholders in your URL definitions. Selected text is automatically formatted and safely URI-encoded at runtime.*
 
