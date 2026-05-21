@@ -73,9 +73,8 @@ The Search Shortcuts settings allow you to select text on any webpage, right-cli
 
 | Shortcut Title | URL Template | Custom Regex (Optional) | Regex Replacement (Optional) | Example Input Selection | Example Formatted Search URL |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Search on Siro** | `https://sirowiki.com/search/?keyword={query}` | *(None)* | *(None)* | `Mechanical Engineering` | `https://sirowiki.com/search/?keyword=Mechanical%20Engineering` |
-| **Clean Code Search** | `https://missav.ai/search/{id}` | `([a-zA-Z]+)(0+)?-?(\d{3,})` | `$1-$3` | `MC-000456` | `https://missav.ai/search/MC-456` |
-| **Model Registry** | `https://video.dmm.co.jp/av/list/?key={id}` | `([a-zA-Z]+)(0+)?-?(\d{3,})` | `$1 $3` | `MC000456` | `https://video.dmm.co.jp/av/list/?key=MC%20456` |
+| **Google Search** | `https://www.google.com/search?q={query}` | *(None)* | *(None)* | `Antigravity AI` | `https://www.google.com/search?q=Antigravity%20AI` |
+| **Clean ID Search** | `https://example.com/item/{id}` | `(\w+)` | `$1` | `MC-123` | `https://example.com/item/MC-123` |
 
 *Use `{id}` or `{query}` as template placeholders in your URL definitions. Selected text is automatically formatted and safely URI-encoded at runtime.*
 
