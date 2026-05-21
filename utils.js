@@ -53,27 +53,27 @@ function performSearch(query, engine, currentTab) {
  * Entrypoint: Initializes storage defaults, registers context menus, and sets up listeners.
  */
 export async function initializeSearchShortcuts() {
-  const data = await chrome.storage.local.get("searchEngines");
-  
-  if (!data.searchEngines) {
-    activeEngines = [];
-    await chrome.storage.local.set({ searchEngines: activeEngines });
-  } else {
-    activeEngines = data.searchEngines;
-  }
-
   // Setup context menus on startup and install
-  const setupContextMenus = () => {
+  const setupContextMenus = async () => {
+    const data = await chrome.storage.local.get("searchEngines");
+    if (data.searchEngines) {
+      activeEngines = data.searchEngines;
+    }
     rebuildContextMenus();
   };
+
+  // Register listeners SYNCHRONOUSLY before any await, to ensure Manifest V3 service worker registers them on the first tick
   chrome.runtime.onStartup.addListener(setupContextMenus);
   chrome.runtime.onInstalled.addListener(setupContextMenus);
 
-  // Run immediately as well
-  rebuildContextMenus();
-
   // Listen to context menu clicks
-  chrome.contextMenus.onClicked.addListener((info, tab) => {
+  chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+    if (activeEngines.length === 0) {
+      const data = await chrome.storage.local.get("searchEngines");
+      if (data.searchEngines) {
+        activeEngines = data.searchEngines;
+      }
+    }
     const engine = activeEngines.find((e) => e.id === info.menuItemId);
     if (engine && info.selectionText) {
       performSearch(info.selectionText, engine, tab);
@@ -87,5 +87,18 @@ export async function initializeSearchShortcuts() {
       rebuildContextMenus();
     }
   });
+
+  // Now perform the asynchronous data initialization
+  const data = await chrome.storage.local.get("searchEngines");
+  
+  if (!data.searchEngines) {
+    activeEngines = [];
+    await chrome.storage.local.set({ searchEngines: activeEngines });
+  } else {
+    activeEngines = data.searchEngines;
+  }
+
+  // Run immediately as well
+  rebuildContextMenus();
 }
 
