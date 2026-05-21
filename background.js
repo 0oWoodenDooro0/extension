@@ -1,8 +1,7 @@
-import { addSearchShortcut, redirectUrl } from './utils.js'
+import { initializeSearchShortcuts } from './utils.js'
 
-addSearchShortcut();
+initializeSearchShortcuts();
 
-redirectUrl();
 
 // 監聽快捷鍵指令
 browser.commands.onCommand.addListener(async (command) => {

@@ -10,8 +10,6 @@
     "tabs",
     "storage",
     "downloads",
-    "webRequest",
-    "webRequestBlocking",
     "webNavigation",
     "<all_urls>"
   ],

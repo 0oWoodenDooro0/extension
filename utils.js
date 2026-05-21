@@ -1,115 +1,146 @@
-export function addSearchShortcut() {
+// Local module cache of active engines
+let activeEngines = [];
 
-  function createContextMenu() {
-    browser.contextMenus.create({
-      id: "searchOnMis", title: "Search on Mis", contexts: ["selection"]
-    })
-    browser.contextMenus.create({
-      id: "searchOnSiro", title: "Search on Siro", contexts: ["selection"]
-    })
-    browser.contextMenus.create({
-      id: "searchOnVida", title: "Search on Vida", contexts: ["selection"]
-    })
-    browser.contextMenus.create({
-      id: "searchOnVidc", title: "Search on Vidc", contexts: ["selection"]
-    })
+/**
+ * Format the query using the user-provided regex pattern and replacement target.
+ */
+function formatQuery(query, engine) {
+  if (!engine.queryRegex || !engine.queryReplacement) {
+    return query;
   }
-
-  browser.runtime.onStartup.addListener(createContextMenu)
-  browser.runtime.onInstalled.addListener(createContextMenu)
-
-  browser.contextMenus.onClicked.addListener((info, tab) => {
-    if (info.menuItemId === "searchOnMis") {
-      const query = info.selectionText.trim();
-      searchOnMissav(query, tab)
-    } else if (info.menuItemId === "searchOnSiro") {
-      const query = info.selectionText.trim();
-      searchOnSiro(query, tab)
-    } else if (info.menuItemId === "searchOnVida") {
-      const query = info.selectionText.trim()
-      searchOnVida(query, tab)
-    } else if (info.menuItemId === "searchOnVidc") {
-      const query = info.selectionText.trim()
-      searchOnVidc(query, tab)
-    }
-  });
-
-  browser.commands.onCommand.addListener((command) => {
-    browser.tabs.query({ currentWindow: true, active: true }, function (result) {
-      let tab = result[0];
-      browser.scripting.executeScript({
-        target: { tabId: tab.id }, function: () => {
-          return window.getSelection().toString();
-        }
-      }, (selection) => {
-        const query = selection[0].result.trim();
-        if (command === "search_on_mis") {
-          searchOnMissav(query, tab)
-        } else if (command === "search_on_siro") {
-          searchOnSiro(query, tab)
-        }
-      });
-    });
-  })
-
-  function searchOnMissav(query, currentTab) {
-    const data = query.match(/([a-zA-Z]+)(0+)?-?(\d{3,})/)
-    let id = (data === null) ? query : data[1] + "-" + data[3]
-    const misSearchUrl = `https://missav.ai/search/${encodeURIComponent(id)}`;
-    browser.tabs.create({ url: misSearchUrl, index: currentTab ? currentTab.index + 1 : undefined, openerTabId: currentTab ? currentTab.id : undefined });
-  }
-
-  function searchOnSiro(query, currentTab) {
-    const siroSearchUrl = `https://sirowiki.com/search/?keyword=${encodeURIComponent(query)}`;
-    browser.tabs.create({ url: siroSearchUrl, index: currentTab ? currentTab.index + 1 : undefined, openerTabId: currentTab ? currentTab.id : undefined });
-  }
-
-  function searchOnVida(query, currentTab) {
-    const data = query.match(/([a-zA-Z]+)(0+)?-?(\d{3,})/)
-    let id = (data === null) ? query : data[1] + " " + data[3]
-    const vidaSearchUrl = `https://video.dmm.co.jp/av/list/?key=${encodeURIComponent(id)}`;
-    browser.tabs.create({ url: vidaSearchUrl, index: currentTab ? currentTab.index + 1 : undefined, openerTabId: currentTab ? currentTab.id : undefined });
-  }
-
-  function searchOnVidc(query, currentTab) {
-    const data = query.match(/([a-zA-Z]+)(0+)?-?(\d{3,})/)
-    let id = (data === null) ? query : data[1] + " " + data[3]
-    const vidcSearchUrl = `https://video.dmm.co.jp/amateur/list/?key=${encodeURIComponent(id)}`;
-    browser.tabs.create({ url: vidcSearchUrl, index: currentTab ? currentTab.index + 1 : undefined, openerTabId: currentTab ? currentTab.id : undefined });
+  try {
+    const regex = new RegExp(engine.queryRegex);
+    return query.replace(regex, engine.queryReplacement);
+  } catch (error) {
+    console.error(`Regex replacement error for engine ${engine.id}:`, error);
+    return query;
   }
 }
 
-export function redirectUrl() {
+/**
+ * Create dynamic context menu items based on active configuration.
+ */
+function rebuildContextMenus() {
+  browser.contextMenus.removeAll(() => {
+    activeEngines.forEach((engine) => {
+      browser.contextMenus.create({
+        id: engine.id,
+        title: engine.title,
+        contexts: ["selection"]
+      });
+    });
+  });
+}
 
-  function cleanUrlParameters(details) {
-    const originalUrl = details.url;
+/**
+ * Open a search engine URL based on selected text.
+ */
+function performSearch(query, engine, currentTab) {
+  const trimmed = query.trim();
+  const processedQuery = formatQuery(trimmed, engine);
+  const searchUrl = engine.urlTemplate
+    .replace("{id}", encodeURIComponent(processedQuery))
+    .replace("{query}", encodeURIComponent(processedQuery));
 
-    if (details.type !== 'main_frame') {
-      return;
-    }
+  browser.tabs.create({
+    url: searchUrl,
+    index: currentTab ? currentTab.index + 1 : undefined,
+    openerTabId: currentTab ? currentTab.id : undefined
+  });
+}
 
-    const url = new URL(originalUrl);
-    const params = url.searchParams;
-
-    if (params.has('id') && params.size > 1) {
-      const idValue = params.get('id');
-
-      const newUrl = `${url.origin}${url.pathname}?id=${encodeURIComponent(idValue)}`;
-
-      if (originalUrl !== newUrl) {
-        return { redirectUrl: newUrl };
+/**
+ * Entrypoint: Initializes storage defaults, registers context menus, and sets up listeners.
+ */
+export async function initializeSearchShortcuts() {
+  const data = await browser.storage.local.get("searchEngines");
+  
+  if (!data.searchEngines) {
+    activeEngines = [
+      {
+        id: "searchOnMis",
+        title: "Search on Mis",
+        urlTemplate: "https://missav.ai/search/{id}",
+        queryRegex: "([a-zA-Z]+)(0+)?-?(\\d{3,})",
+        queryReplacement: "$1-$3",
+        command: "search_on_mis"
+      },
+      {
+        id: "searchOnSiro",
+        title: "Search on Siro",
+        urlTemplate: "https://sirowiki.com/search/?keyword={query}",
+        queryRegex: null,
+        queryReplacement: null,
+        command: "search_on_siro"
+      },
+      {
+        id: "searchOnVida",
+        title: "Search on Vida",
+        urlTemplate: "https://video.dmm.co.jp/av/list/?key={id}",
+        queryRegex: "([a-zA-Z]+)(0+)?-?(\\d{3,})",
+        queryReplacement: "$1 $3",
+        command: null
+      },
+      {
+        id: "searchOnVidc",
+        title: "Search on Vidc",
+        urlTemplate: "https://video.dmm.co.jp/amateur/list/?key={id}",
+        queryRegex: "([a-zA-Z]+)(0+)?-?(\\d{3,})",
+        queryReplacement: "$1 $3",
+        command: null
       }
-    }
-
-    return;
+    ];
+    await browser.storage.local.set({ searchEngines: activeEngines });
+  } else {
+    activeEngines = data.searchEngines;
   }
 
-  browser.webRequest.onBeforeRequest.addListener(
-    cleanUrlParameters,
-    {
-      urls: ["https://video.dmm.co.jp/*"],
-      types: ["main_frame"]
-    },
-    ["blocking"]
-  );
+  // Setup context menus on startup and install
+  const setupContextMenus = () => {
+    rebuildContextMenus();
+  };
+  browser.runtime.onStartup.addListener(setupContextMenus);
+  browser.runtime.onInstalled.addListener(setupContextMenus);
+
+  // Run immediately as well
+  rebuildContextMenus();
+
+  // Listen to context menu clicks
+  browser.contextMenus.onClicked.addListener((info, tab) => {
+    const engine = activeEngines.find((e) => e.id === info.menuItemId);
+    if (engine && info.selectionText) {
+      performSearch(info.selectionText, engine, tab);
+    }
+  });
+
+  // Listen to keyboard commands mapped to specific engines
+  browser.commands.onCommand.addListener((command) => {
+    const engine = activeEngines.find((e) => e.command === command);
+    if (!engine) return;
+
+    browser.tabs.query({ currentWindow: true, active: true }, (result) => {
+      const tab = result[0];
+      if (!tab) return;
+
+      browser.scripting.executeScript(
+        {
+          target: { tabId: tab.id },
+          func: () => window.getSelection().toString()
+        },
+        (selection) => {
+          if (selection && selection[0] && selection[0].result) {
+            performSearch(selection[0].result, engine, tab);
+          }
+        }
+      );
+    });
+  });
+
+  // Automatically update active settings and context menus in real-time
+  browser.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === "local" && changes.searchEngines) {
+      activeEngines = changes.searchEngines.newValue || [];
+      rebuildContextMenus();
+    }
+  });
 }
