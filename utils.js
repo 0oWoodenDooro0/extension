@@ -56,36 +56,7 @@ export async function initializeSearchShortcuts() {
   const data = await browser.storage.local.get("searchEngines");
   
   if (!data.searchEngines) {
-    activeEngines = [
-      {
-        id: "searchOnMis",
-        title: "Search on Mis",
-        urlTemplate: "https://missav.ai/search/{id}",
-        queryRegex: "([a-zA-Z]+)(0+)?-?(\\d{3,})",
-        queryReplacement: "$1-$3"
-      },
-      {
-        id: "searchOnSiro",
-        title: "Search on Siro",
-        urlTemplate: "https://sirowiki.com/search/?keyword={query}",
-        queryRegex: null,
-        queryReplacement: null
-      },
-      {
-        id: "searchOnVida",
-        title: "Search on Vida",
-        urlTemplate: "https://video.dmm.co.jp/av/list/?key={id}",
-        queryRegex: "([a-zA-Z]+)(0+)?-?(\\d{3,})",
-        queryReplacement: "$1 $3"
-      },
-      {
-        id: "searchOnVidc",
-        title: "Search on Vidc",
-        urlTemplate: "https://video.dmm.co.jp/amateur/list/?key={id}",
-        queryRegex: "([a-zA-Z]+)(0+)?-?(\\d{3,})",
-        queryReplacement: "$1 $3"
-      }
-    ];
+    activeEngines = [];
     await browser.storage.local.set({ searchEngines: activeEngines });
   } else {
     activeEngines = data.searchEngines;
