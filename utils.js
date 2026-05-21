@@ -62,32 +62,28 @@ export async function initializeSearchShortcuts() {
         title: "Search on Mis",
         urlTemplate: "https://missav.ai/search/{id}",
         queryRegex: "([a-zA-Z]+)(0+)?-?(\\d{3,})",
-        queryReplacement: "$1-$3",
-        command: "search_on_mis"
+        queryReplacement: "$1-$3"
       },
       {
         id: "searchOnSiro",
         title: "Search on Siro",
         urlTemplate: "https://sirowiki.com/search/?keyword={query}",
         queryRegex: null,
-        queryReplacement: null,
-        command: "search_on_siro"
+        queryReplacement: null
       },
       {
         id: "searchOnVida",
         title: "Search on Vida",
         urlTemplate: "https://video.dmm.co.jp/av/list/?key={id}",
         queryRegex: "([a-zA-Z]+)(0+)?-?(\\d{3,})",
-        queryReplacement: "$1 $3",
-        command: null
+        queryReplacement: "$1 $3"
       },
       {
         id: "searchOnVidc",
         title: "Search on Vidc",
         urlTemplate: "https://video.dmm.co.jp/amateur/list/?key={id}",
         queryRegex: "([a-zA-Z]+)(0+)?-?(\\d{3,})",
-        queryReplacement: "$1 $3",
-        command: null
+        queryReplacement: "$1 $3"
       }
     ];
     await browser.storage.local.set({ searchEngines: activeEngines });
@@ -111,29 +107,6 @@ export async function initializeSearchShortcuts() {
     if (engine && info.selectionText) {
       performSearch(info.selectionText, engine, tab);
     }
-  });
-
-  // Listen to keyboard commands mapped to specific engines
-  browser.commands.onCommand.addListener((command) => {
-    const engine = activeEngines.find((e) => e.command === command);
-    if (!engine) return;
-
-    browser.tabs.query({ currentWindow: true, active: true }, (result) => {
-      const tab = result[0];
-      if (!tab) return;
-
-      browser.scripting.executeScript(
-        {
-          target: { tabId: tab.id },
-          func: () => window.getSelection().toString()
-        },
-        (selection) => {
-          if (selection && selection[0] && selection[0].result) {
-            performSearch(selection[0].result, engine, tab);
-          }
-        }
-      );
-    });
   });
 
   // Automatically update active settings and context menus in real-time

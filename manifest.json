@@ -28,25 +28,8 @@
     "default_title": "Collections",
     "default_panel": "sidebar/sidebar.html"
   },
-  "commands": {
-    "search_on_siro": {
-      "suggested_key": {
-        "default": "Ctrl+M"
-      },
-      "description": "Search on Siro"
-    },
-    "search_on_mis": {
-      "suggested_key": {
-        "default": "Ctrl+S"
-      },
-      "description": "Search on Mis"
-    },
-    "add-current-tab": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+Y",
-        "mac": "Command+Shift+Y"
-      },
-      "description": "Add current tab to collections"
-    }
+  "browser_action": {
+    "default_title": "Search Shortcuts Settings",
+    "default_popup": "popup/popup.html"
   }
 }

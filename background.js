@@ -3,52 +3,6 @@ import { initializeSearchShortcuts } from './utils.js'
 initializeSearchShortcuts();
 
 
-// 監聽快捷鍵指令
-browser.commands.onCommand.addListener(async (command) => {
-  if (command === "add-current-tab") {
-    try {
-      const tabs = await browser.tabs.query({
-        active: true,
-        currentWindow: true
-      });
-      const currentTab = tabs[0];
-
-      if (!currentTab) return;
-
-      const data = await browser.storage.local.get(['items']);
-      let items = data.items || [];
-
-      // 檢查是否已經存在 (避免重複)
-      const existingItem = items.find(i => i.url === currentTab.url);
-
-      if (existingItem) {
-        console.log("Item already exists:", currentTab.title);
-        return;
-      }
-
-      const newItem = {
-        id: `item-${Date.now()}`,
-        title: currentTab.title,
-        url: currentTab.url,
-        tags: [],
-        actors: [],
-        addDate: Date.now(),
-        imageUrl: null
-      };
-
-      items.push(newItem);
-      await browser.storage.local.set({
-        items: items
-      });
-
-      console.log("Item added via shortcut:", newItem.title);
-
-    } catch (error) {
-      console.error("Error adding item from background:", error);
-    }
-  }
-});
-
 // This script acts as the central communicator.
 
 browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
