@@ -1,5 +1,5 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "Collection",
   "description": "A browser extension to collect and tag items.",
   "version": "2.0",
@@ -11,12 +11,13 @@
     "storage",
     "downloads",
     "webNavigation",
+    "sidePanel"
+  ],
+  "host_permissions": [
     "<all_urls>"
   ],
   "background": {
-    "scripts": [
-      "background.js"
-    ],
+    "service_worker": "background.js",
     "type": "module"
   },
   "browser_specific_settings": {
@@ -28,7 +29,10 @@
     "default_title": "Collections",
     "default_panel": "sidebar/sidebar.html"
   },
-  "browser_action": {
+  "side_panel": {
+    "default_path": "sidebar/sidebar.html"
+  },
+  "action": {
     "default_title": "Search Shortcuts Settings",
     "default_popup": "popup/popup.html"
   }

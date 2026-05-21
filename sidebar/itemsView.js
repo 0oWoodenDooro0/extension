@@ -67,11 +67,11 @@ function setupListEventDelegation() {
       const url = li.dataset.url;
       if (url) {
         // 獲取當前分頁資訊
-        const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
         const currentTab = tabs[0];
 
         // 在當前分頁的下一個位置開啟，並設定 openerTabId 建立關聯
-        browser.tabs.create({
+        chrome.tabs.create({
           url: url,
           index: currentTab ? currentTab.index + 1 : undefined,
           openerTabId: currentTab ? currentTab.id : undefined
@@ -319,12 +319,12 @@ async function openAllItems() {
   const itemsToOpen = getFilteredItems();
   if (itemsToOpen.length > 0) {
     if (confirm(`Open ${itemsToOpen.length} tabs?`)) {
-      const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       const currentTab = tabs[0];
       let startIndex = currentTab ? currentTab.index + 1 : undefined;
 
       itemsToOpen.forEach((item, i) => {
-        browser.tabs.create({
+        chrome.tabs.create({
           url: item.url,
           active: false,
           // 如果有找到當前分頁，就依序 +0, +1, +2 排下去，否則就預設(排最後)
@@ -342,10 +342,10 @@ async function randomItem() {
   if (itemsToChooseFrom.length > 0) {
     const randomItem = itemsToChooseFrom[Math.floor(Math.random() * itemsToChooseFrom.length)];
 
-    const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     const currentTab = tabs[0];
 
-    browser.tabs.create({
+    chrome.tabs.create({
       url: randomItem.url,
       index: currentTab ? currentTab.index + 1 : undefined,
       openerTabId: currentTab ? currentTab.id : undefined

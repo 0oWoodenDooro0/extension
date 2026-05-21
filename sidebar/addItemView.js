@@ -93,7 +93,7 @@ export function showAddItemView(itemId = null) {
     if (deleteItemButton) deleteItemButton.style.display = 'none';
 
     // 從當前分頁抓取資訊
-    browser.tabs.query({ active: true, currentWindow: true }).then(tabs => {
+    chrome.tabs.query({ active: true, currentWindow: true }).then(tabs => {
       const currentTab = tabs[0];
       if (!currentTab) return;
 
@@ -131,7 +131,7 @@ export function isEditingMode() {
 // --- Internal Logic ---
 
 function tryFetchImage(url) {
-  browser.runtime.sendMessage({ action: 'getImage', url: url })
+  chrome.runtime.sendMessage({ action: 'getImage', url: url })
     .then(response => {
       if (response && response.imageUrl) {
         // [Reverted] 只有當輸入框為空時才填入，避免覆蓋使用者的手動輸入

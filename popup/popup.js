@@ -22,12 +22,12 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Load and Initialize Settings
     async function loadSettings() {
-        const data = await browser.storage.local.get("searchEngines");
+        const data = await chrome.storage.local.get("searchEngines");
         if (data.searchEngines) {
             searchEngines = data.searchEngines;
         } else {
             searchEngines = [];
-            await browser.storage.local.set({ searchEngines });
+            await chrome.storage.local.set({ searchEngines });
         }
         renderList();
     }
@@ -142,7 +142,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             searchEngines.push({ id: newId, title, urlTemplate: url, queryRegex: regex, queryReplacement: replacement });
         }
 
-        await browser.storage.local.set({ searchEngines });
+        await chrome.storage.local.set({ searchEngines });
         closeForm();
         renderList();
     }
@@ -151,7 +151,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     async function deleteEngine(id) {
         if (confirm("Are you sure you want to delete this search shortcut?")) {
             searchEngines = searchEngines.filter((e) => e.id !== id);
-            await browser.storage.local.set({ searchEngines });
+            await chrome.storage.local.set({ searchEngines });
             renderList();
         }
     }
@@ -164,3 +164,4 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Initial Load
     await loadSettings();
 });
+

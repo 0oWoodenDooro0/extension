@@ -21,9 +21,9 @@ function formatQuery(query, engine) {
  * Create dynamic context menu items based on active configuration.
  */
 function rebuildContextMenus() {
-  browser.contextMenus.removeAll(() => {
+  chrome.contextMenus.removeAll(() => {
     activeEngines.forEach((engine) => {
-      browser.contextMenus.create({
+      chrome.contextMenus.create({
         id: engine.id,
         title: engine.title,
         contexts: ["selection"]
@@ -42,7 +42,7 @@ function performSearch(query, engine, currentTab) {
     .replace("{id}", encodeURIComponent(processedQuery))
     .replace("{query}", encodeURIComponent(processedQuery));
 
-  browser.tabs.create({
+  chrome.tabs.create({
     url: searchUrl,
     index: currentTab ? currentTab.index + 1 : undefined,
     openerTabId: currentTab ? currentTab.id : undefined
@@ -53,11 +53,11 @@ function performSearch(query, engine, currentTab) {
  * Entrypoint: Initializes storage defaults, registers context menus, and sets up listeners.
  */
 export async function initializeSearchShortcuts() {
-  const data = await browser.storage.local.get("searchEngines");
+  const data = await chrome.storage.local.get("searchEngines");
   
   if (!data.searchEngines) {
     activeEngines = [];
-    await browser.storage.local.set({ searchEngines: activeEngines });
+    await chrome.storage.local.set({ searchEngines: activeEngines });
   } else {
     activeEngines = data.searchEngines;
   }
@@ -66,14 +66,14 @@ export async function initializeSearchShortcuts() {
   const setupContextMenus = () => {
     rebuildContextMenus();
   };
-  browser.runtime.onStartup.addListener(setupContextMenus);
-  browser.runtime.onInstalled.addListener(setupContextMenus);
+  chrome.runtime.onStartup.addListener(setupContextMenus);
+  chrome.runtime.onInstalled.addListener(setupContextMenus);
 
   // Run immediately as well
   rebuildContextMenus();
 
   // Listen to context menu clicks
-  browser.contextMenus.onClicked.addListener((info, tab) => {
+  chrome.contextMenus.onClicked.addListener((info, tab) => {
     const engine = activeEngines.find((e) => e.id === info.menuItemId);
     if (engine && info.selectionText) {
       performSearch(info.selectionText, engine, tab);
@@ -81,10 +81,11 @@ export async function initializeSearchShortcuts() {
   });
 
   // Automatically update active settings and context menus in real-time
-  browser.storage.onChanged.addListener((changes, areaName) => {
+  chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === "local" && changes.searchEngines) {
       activeEngines = changes.searchEngines.newValue || [];
       rebuildContextMenus();
     }
   });
 }
+

@@ -91,7 +91,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const filename = `collection_backup_${new Date().toISOString().split('T')[0]}.json`;
-      browser.downloads.download({ url: url, filename: filename, saveAs: true })
+      chrome.downloads.download({ url: url, filename: filename, saveAs: true })
         .then(() => URL.revokeObjectURL(url), () => URL.revokeObjectURL(url));
     });
   }
@@ -121,7 +121,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // --- Storage Listener ---
-  browser.storage.onChanged.addListener((changes, area) => {
+  chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local') {
       if (currentViewName === 'manage') {
         displayManageTagList();
