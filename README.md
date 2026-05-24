@@ -29,8 +29,6 @@ The repository is structured logically to separate concern, enforce clean module
 ├── popup/                 # Search Shortcut Settings Popup
 │   ├── popup.html         # Light-aesthetic layout for managing search templates
 │   └── popup.js           # Settings CRUD controller & storage handlers
-├── scripts/               # Secondary helper scripts
-│   └── image_finder.js    # Image discovery scraper injected in background tabs
 └── sidebar/               # Main Collection Sidebar Module
     ├── sidebar.html       # Sidebar visual UI with flex designs
     ├── sidebar.js         # Navigation router and import/export coordinator

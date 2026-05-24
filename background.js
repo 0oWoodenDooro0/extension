@@ -5,65 +5,59 @@ initializeSearchShortcuts();
 
 // This script acts as the central communicator.
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  // Listen for the 'getImage' request from the sidebar
-  if (request.action === 'getImage' && request.url) {
-
-    // --- NEW LOGIC: Create a temporary background tab to fetch the correct content ---
-    chrome.tabs.create({
-      url: request.url,
-      active: false // Create the tab in the background, so it's not visible
-    }).then(newTab => {
-      // Now, we need to wait for this new tab to finish loading.
-      const listener = (tabId, changeInfo, tab) => {
-        // We only care about our temporary tab and when it's fully loaded
-        if (tabId === newTab.id && changeInfo.status === 'complete') {
-          // The tab has loaded, now we can safely inject the script.
-          chrome.scripting.executeScript({
-            target: { tabId: newTab.id },
-            files: ['scripts/image_finder.js']
-          })
-            .then(injectionResults => {
-              const imageUrl = (injectionResults && injectionResults[0] && injectionResults[0].result) ? injectionResults[0].result : null;
-
-              // Send the result back to the sidebar
-              sendResponse({ imageUrl: imageUrl });
-
-              // Clean up: close the temporary tab and remove the listener
-              chrome.tabs.remove(newTab.id);
-              chrome.tabs.onUpdated.removeListener(listener);
-            })
-            .catch(error => {
-              console.error(`Failed to inject script into ${request.url}:`, error);
-              sendResponse({ imageUrl: null });
-              chrome.tabs.remove(newTab.id);
-              chrome.tabs.onUpdated.removeListener(listener);
-            });
-        }
-      };
-
-      // Register the listener to wait for the tab to load
-      chrome.tabs.onUpdated.addListener(listener);
-
-      // Add a timeout to prevent the tab from staying open forever if it fails to load
-      setTimeout(() => {
-        chrome.tabs.get(newTab.id, (tab) => {
-          if (tab) { // If the tab still exists
-            console.warn(`Tab for ${request.url} timed out. Closing it.`);
-            sendResponse({ imageUrl: null });
-            chrome.tabs.remove(newTab.id);
-            chrome.tabs.onUpdated.removeListener(listener);
-          }
-        });
-      }, 15000); // 15 seconds timeout
-
-    }).catch(error => {
-      console.error(`Failed to create a new tab for ${request.url}:`, error);
-      sendResponse({ imageUrl: null });
+// 尋找主網域與路徑匹配的已開啟分頁，並直接注入腳本提取 og:image (支援 JS 動態渲染 DOM)
+async function getImageFromExistingTab(url) {
+  try {
+    const tabs = await chrome.tabs.query({});
+    const targetUrlObj = new URL(url);
+    
+    // 尋找與目標 URL 的 origin 與 pathname 匹配的分頁 (忽略 hash 與 query 差異以提高匹配率)
+    const matchingTab = tabs.find(t => {
+      try {
+        const tabUrlObj = new URL(t.url);
+        return tabUrlObj.origin === targetUrlObj.origin && tabUrlObj.pathname === targetUrlObj.pathname;
+      } catch (e) {
+        return false;
+      }
     });
 
-  // This is crucial: return true to indicate you will send a response asynchronously
-  return true;
+    if (matchingTab) {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: matchingTab.id },
+        func: () => {
+          const metas = document.querySelectorAll("meta[property='og:image']");
+          if (metas && metas.length > 0) {
+            // 對於動態 SPA 網站，切換頁面後動態新增的最新 og:image 會排在最後面，因此取最後一個
+            const meta = metas[metas.length - 1];
+            if (meta && meta.content) {
+              let imageUrl = meta.content;
+              if (imageUrl.startsWith('/')) {
+                // 自動轉換為絕對路徑
+                imageUrl = window.location.origin + imageUrl;
+              }
+              return imageUrl;
+            }
+          }
+          return null;
+        }
+      });
+      return (results && results[0]) ? results[0].result : null;
+    }
+  } catch (error) {
+    // 忽略錯誤以保持主控台完全乾淨
+  }
+  return null;
+}
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // 監聽側邊欄的 'getImage' 請求
+  if (request.action === 'getImage' && request.url) {
+    getImageFromExistingTab(request.url).then(imageUrl => {
+      sendResponse({ imageUrl: imageUrl });
+    });
+
+    // 異步回傳指示
+    return true;
   }
 });
 
