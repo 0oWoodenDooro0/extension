@@ -26,7 +26,6 @@ The repository is structured logically to separate concern, enforce clean module
 ├── background.js          # Event-driven background service worker (scrapers, communication)
 ├── utils.js               # Search shortcut logic & dynamic context menu managers
 ├── manifest.json          # Main Manifest V3 configuration (dual side-panel & actions)
-├── docs/                  # Design specifications and implementation plans
 ├── popup/                 # Search Shortcut Settings Popup
 │   ├── popup.html         # Light-aesthetic layout for managing search templates
 │   └── popup.js           # Settings CRUD controller & storage handlers
