@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { CollectionStore, MemoryStorageAdapter } from '../sidebar/store.js';
+import { CollectionStore, MemoryStorageAdapter, UNTAGGED_TAG } from '../sidebar/store.js';
 
 describe('CollectionStore (Deep Module)', () => {
   let adapter;
@@ -213,6 +213,130 @@ describe('CollectionStore (Deep Module)', () => {
     });
   });
 
+  describe('Query Interface (queryItems & getRandomItem)', () => {
+    beforeEach(async () => {
+      // Seed rich collection data for querying
+      const item1 = await store.saveItem({
+        title: 'React Documentation & Tutorial',
+        url: 'https://react.dev',
+        tags: ['Frontend', 'JavaScript'],
+        actors: ['Dan Abramov']
+      });
+      item1.addDate = 1000; // Explicitly set orderable timestamps
+
+      const item2 = await store.saveItem({
+        title: 'Node.js Backend Guide',
+        url: 'https://nodejs.org/guide',
+        tags: ['Backend', 'JavaScript'],
+        actors: ['Ryan Dahl', 'Dan Abramov']
+      });
+      item2.addDate = 2000;
+
+      const item3 = await store.saveItem({
+        title: 'Python Machine Learning',
+        url: 'https://python.org',
+        tags: ['AI', 'Python'],
+        actors: ['Guido van Rossum']
+      });
+      item3.addDate = 3000;
+
+      const item4 = await store.saveItem({
+        title: 'Untagged Article',
+        url: 'https://example.com/untagged',
+        tags: [],
+        actors: ['Anonymous']
+      });
+      item4.addDate = 4000;
+    });
+
+    it('returns all items sorted by addDate descending by default', () => {
+      const results = store.queryItems();
+      assert.strictEqual(results.length, 4);
+      assert.strictEqual(results[0].title, 'Untagged Article'); // addDate: 4000
+      assert.strictEqual(results[1].title, 'Python Machine Learning'); // addDate: 3000
+      assert.strictEqual(results[2].title, 'Node.js Backend Guide'); // addDate: 2000
+      assert.strictEqual(results[3].title, 'React Documentation & Tutorial'); // addDate: 1000
+    });
+
+    it('filters items by a single tag', () => {
+      const results = store.queryItems({ tags: ['Frontend'] });
+      assert.strictEqual(results.length, 1);
+      assert.strictEqual(results[0].title, 'React Documentation & Tutorial');
+    });
+
+    it('filters items by multiple tags using intersection logic', () => {
+      const jsResults = store.queryItems({ tags: ['JavaScript'] });
+      assert.strictEqual(jsResults.length, 2);
+
+      const intersectionResults = store.queryItems({ tags: ['JavaScript', 'Backend'] });
+      assert.strictEqual(intersectionResults.length, 1);
+      assert.strictEqual(intersectionResults[0].title, 'Node.js Backend Guide');
+    });
+
+    it('filters untagged items with untagged boolean flag and UNTAGGED_TAG', () => {
+      const byFlag = store.queryItems({ untagged: true });
+      assert.strictEqual(byFlag.length, 1);
+      assert.strictEqual(byFlag[0].title, 'Untagged Article');
+
+      const byTagConstant = store.queryItems({ tags: [UNTAGGED_TAG] });
+      assert.strictEqual(byTagConstant.length, 1);
+      assert.strictEqual(byTagConstant[0].title, 'Untagged Article');
+    });
+
+    it('filters items by actor name with case-insensitive substring matching', () => {
+      const results = store.queryItems({ actor: 'dan' });
+      assert.strictEqual(results.length, 2);
+      assert.ok(results.some(i => i.title === 'React Documentation & Tutorial'));
+      assert.ok(results.some(i => i.title === 'Node.js Backend Guide'));
+
+      const noMatch = store.queryItems({ actor: 'nobody' });
+      assert.strictEqual(noMatch.length, 0);
+    });
+
+    it('performs fulltext search matching across title, url, and actor names', () => {
+      // Match by title
+      const titleMatch = store.queryItems({ search: 'machine' });
+      assert.strictEqual(titleMatch.length, 1);
+      assert.strictEqual(titleMatch[0].title, 'Python Machine Learning');
+
+      // Match by url
+      const urlMatch = store.queryItems({ search: 'nodejs.org' });
+      assert.strictEqual(urlMatch.length, 1);
+      assert.strictEqual(urlMatch[0].title, 'Node.js Backend Guide');
+
+      // Match by actor
+      const actorMatch = store.queryItems({ search: 'guido' });
+      assert.strictEqual(actorMatch.length, 1);
+      assert.strictEqual(actorMatch[0].title, 'Python Machine Learning');
+    });
+
+    it('combines tags, actor, and search criteria simultaneously', () => {
+      const results = store.queryItems({
+        tags: ['JavaScript'],
+        actor: 'Dan',
+        search: 'backend'
+      });
+
+      assert.strictEqual(results.length, 1);
+      assert.strictEqual(results[0].title, 'Node.js Backend Guide');
+    });
+
+    it('supports custom sorting order (asc vs desc)', () => {
+      const ascResults = store.queryItems({ sortBy: 'addDate', sortOrder: 'asc' });
+      assert.strictEqual(ascResults[0].title, 'React Documentation & Tutorial'); // addDate: 1000
+      assert.strictEqual(ascResults[3].title, 'Untagged Article'); // addDate: 4000
+    });
+
+    it('returns a random matching item with getRandomItem() or null when empty', () => {
+      const randomJs = store.getRandomItem({ tags: ['JavaScript'] });
+      assert.ok(randomJs);
+      assert.ok(randomJs.title === 'React Documentation & Tutorial' || randomJs.title === 'Node.js Backend Guide');
+
+      const randomEmpty = store.getRandomItem({ search: 'nonexistent-xyz' });
+      assert.strictEqual(randomEmpty, null);
+    });
+  });
+
   describe('Import & Export Portability', () => {
     it('exports clean snapshot of current state', async () => {
       await store.addTag('TagA');
@@ -277,3 +401,4 @@ describe('CollectionStore (Deep Module)', () => {
     });
   });
 });
+
