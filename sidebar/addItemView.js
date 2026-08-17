@@ -1,5 +1,6 @@
 // addItemView.js - 負責新增與編輯項目的表單邏輯
 import { collectionStore } from './store.js';
+import { tabAdapter } from '../tabAdapter.js';
 
 // --- DOM Elements ---
 let itemTitleInput, itemUrlInput, itemImageUrlInput;
@@ -93,36 +94,34 @@ export function showAddItemView(itemId = null) {
     if (deleteItemButton) deleteItemButton.style.display = 'none';
 
     // 從當前分頁抓取資訊
-    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
-      chrome.tabs.query({ active: true, currentWindow: true }).then(tabs => {
-        const currentTab = tabs && tabs[0];
-        if (!currentTab) return;
-
-        if (itemTitleInput) itemTitleInput.value = currentTab.title || '';
-        if (itemUrlInput) itemUrlInput.value = currentTab.url || '';
-
-        // 檢查是否已存在
-        const existingItem = currentTab.url ? collectionStore.getItemByUrl(currentTab.url) : null;
-        if (existingItem) {
-          populateTagSelector(existingItem.tags || []);
-          if (itemImageUrlInput) itemImageUrlInput.value = existingItem.imageUrl || '';
-          currentEditingActors = existingItem.actors ? [...existingItem.actors] : [];
-        } else {
-          populateTagSelector([]);
-          currentEditingActors = [];
-        }
-
+    tabAdapter.getActiveTab().then(currentTab => {
+      if (!currentTab) {
+        populateTagSelector([]);
+        currentEditingActors = [];
         renderActorChips();
+        return;
+      }
 
-        if (currentTab.url) {
-          tryFetchImage(currentTab.url);
-        }
-      });
-    } else {
-      populateTagSelector([]);
-      currentEditingActors = [];
+      if (itemTitleInput) itemTitleInput.value = currentTab.title || '';
+      if (itemUrlInput) itemUrlInput.value = currentTab.url || '';
+
+      // 檢查是否已存在
+      const existingItem = currentTab.url ? collectionStore.getItemByUrl(currentTab.url) : null;
+      if (existingItem) {
+        populateTagSelector(existingItem.tags || []);
+        if (itemImageUrlInput) itemImageUrlInput.value = existingItem.imageUrl || '';
+        currentEditingActors = existingItem.actors ? [...existingItem.actors] : [];
+      } else {
+        populateTagSelector([]);
+        currentEditingActors = [];
+      }
+
       renderActorChips();
-    }
+
+      if (currentTab.url) {
+        tryFetchImage(currentTab.url);
+      }
+    });
   }
 
   renderActorChips();

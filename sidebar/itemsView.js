@@ -1,5 +1,6 @@
 // itemsView.js - 負責渲染項目列表、處理搜尋、過濾、右鍵選單
 import { collectionStore, UNTAGGED_TAG } from './store.js';
+import { tabAdapter } from '../tabAdapter.js';
 
 // --- Local State for this view ---
 let currentTag = "All Items";
@@ -69,18 +70,8 @@ function setupListEventDelegation() {
   // 左鍵點擊：開啟連結
   itemList.addEventListener('click', async (e) => {
     const li = e.target.closest('.listItem');
-    if (li) {
-      const url = li.dataset.url;
-      if (url && typeof chrome !== 'undefined' && chrome.tabs) {
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        const currentTab = tabs && tabs[0];
-
-        chrome.tabs.create({
-          url: url,
-          index: currentTab ? currentTab.index + 1 : undefined,
-          openerTabId: currentTab ? currentTab.id : undefined
-        });
-      }
+    if (li && li.dataset.url) {
+      tabAdapter.openAdjacent(li.dataset.url);
     }
   });
 
@@ -279,20 +270,9 @@ function removeCustomContextMenu() {
 
 async function openAllItems() {
   const itemsToOpen = getFilteredItems();
-  if (itemsToOpen.length > 0 && typeof chrome !== 'undefined' && chrome.tabs) {
+  if (itemsToOpen.length > 0) {
     if (confirm(`Open ${itemsToOpen.length} tabs?`)) {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      const currentTab = tabs && tabs[0];
-      let startIndex = currentTab ? currentTab.index + 1 : undefined;
-
-      itemsToOpen.forEach((item, i) => {
-        chrome.tabs.create({
-          url: item.url,
-          active: false,
-          index: startIndex !== undefined ? startIndex + i : undefined,
-          openerTabId: currentTab ? currentTab.id : undefined
-        });
-      });
+      await tabAdapter.openBatchAdjacent(itemsToOpen.map(item => item.url), { active: false });
     }
   }
 }
@@ -305,16 +285,8 @@ async function randomItem() {
     search: searchTerm
   });
 
-  if (randomItem && typeof chrome !== 'undefined' && chrome.tabs) {
-
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const currentTab = tabs && tabs[0];
-
-    chrome.tabs.create({
-      url: randomItem.url,
-      index: currentTab ? currentTab.index + 1 : undefined,
-      openerTabId: currentTab ? currentTab.id : undefined
-    });
+  if (randomItem && randomItem.url) {
+    await tabAdapter.openAdjacent(randomItem.url);
 
     const listItem = document.getElementById(`item-${randomItem.id}`);
     if (listItem) {
