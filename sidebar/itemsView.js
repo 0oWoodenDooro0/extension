@@ -1,12 +1,10 @@
 // itemsView.js - 負責渲染項目列表、處理搜尋、過濾、右鍵選單
-import { collectionStore } from './store.js';
+import { collectionStore, UNTAGGED_TAG } from './store.js';
 
 // --- Local State for this view ---
 let currentTag = "All Items";
 let activeFilters = [];
 let currentActorFilter = "";
-
-const UNTAGGED_KEY = "_UNTAGGED_";
 
 // --- DOM Elements ---
 let itemList, itemSearchInput, tagFilterContainer;
@@ -145,8 +143,8 @@ function populateTagFilterBar() {
   const fragment = document.createDocumentFragment();
 
   // 1. Untagged 按鈕
-  const untaggedBtn = createFilterButton('Untagged', activeFilters.includes(UNTAGGED_KEY));
-  untaggedBtn.addEventListener('click', () => toggleFilter(UNTAGGED_KEY));
+  const untaggedBtn = createFilterButton('Untagged', activeFilters.includes(UNTAGGED_TAG));
+  untaggedBtn.addEventListener('click', () => toggleFilter(UNTAGGED_TAG));
   fragment.appendChild(untaggedBtn);
 
   // 2. 一般標籤按鈕
@@ -169,14 +167,14 @@ function createFilterButton(text, isSelected) {
 }
 
 function toggleFilter(filterKey) {
-  if (filterKey === UNTAGGED_KEY) {
-    if (activeFilters.includes(UNTAGGED_KEY)) {
+  if (filterKey === UNTAGGED_TAG) {
+    if (activeFilters.includes(UNTAGGED_TAG)) {
       activeFilters = [];
     } else {
-      activeFilters = [UNTAGGED_KEY];
+      activeFilters = [UNTAGGED_TAG];
     }
   } else {
-    if (activeFilters.includes(UNTAGGED_KEY)) {
+    if (activeFilters.includes(UNTAGGED_TAG)) {
       activeFilters = [];
     }
     if (activeFilters.includes(filterKey)) {
@@ -190,46 +188,19 @@ function toggleFilter(filterKey) {
 }
 
 function getFilteredItems() {
-  let filtered = collectionStore.getItems();
-
-  // 1. Tag Scope
-  if (activeFilters.length > 0) {
-    if (activeFilters.includes(UNTAGGED_KEY)) {
-      filtered = filtered.filter(item => !item.tags || item.tags.length === 0);
-    } else {
-      filtered = filtered.filter(item =>
-        activeFilters.every(filterTag => item.tags && item.tags.includes(filterTag))
-      );
-    }
-  }
-
-  // 2. Actor Filter
-  if (currentActorFilter) {
-    const filterLower = currentActorFilter.toLowerCase();
-    filtered = filtered.filter(item => {
-      const actors = item.actors || [];
-      return actors.some(a => a.toLowerCase().includes(filterLower));
-    });
-  }
-
-  // 3. Search Text
-  const searchTerm = itemSearchInput ? itemSearchInput.value.toLowerCase().trim() : '';
-  if (searchTerm) {
-    filtered = filtered.filter(item => {
-      const titleMatch = item.title && item.title.toLowerCase().includes(searchTerm);
-      const urlMatch = item.url && item.url.toLowerCase().includes(searchTerm);
-      const actors = item.actors || [];
-      const actorMatch = actors.some(a => a.toLowerCase().includes(searchTerm));
-      return titleMatch || urlMatch || actorMatch;
-    });
-  }
-  return filtered;
+  const searchTerm = itemSearchInput ? itemSearchInput.value : '';
+  return collectionStore.queryItems({
+    tags: activeFilters,
+    actor: currentActorFilter,
+    search: searchTerm,
+    sortBy: 'addDate',
+    sortOrder: 'desc'
+  });
 }
 
 function renderFilteredList() {
   if (!itemList) return;
   const itemsToDisplay = getFilteredItems();
-  itemsToDisplay.sort((a, b) => (b.addDate || 0) - (a.addDate || 0));
 
   itemList.innerHTML = '';
   const fragment = document.createDocumentFragment();
@@ -327,9 +298,14 @@ async function openAllItems() {
 }
 
 async function randomItem() {
-  const itemsToChooseFrom = getFilteredItems();
-  if (itemsToChooseFrom.length > 0 && typeof chrome !== 'undefined' && chrome.tabs) {
-    const randomItem = itemsToChooseFrom[Math.floor(Math.random() * itemsToChooseFrom.length)];
+  const searchTerm = itemSearchInput ? itemSearchInput.value : '';
+  const randomItem = collectionStore.getRandomItem({
+    tags: activeFilters,
+    actor: currentActorFilter,
+    search: searchTerm
+  });
+
+  if (randomItem && typeof chrome !== 'undefined' && chrome.tabs) {
 
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     const currentTab = tabs && tabs[0];
