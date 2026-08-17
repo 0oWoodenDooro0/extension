@@ -1,6 +1,7 @@
 // itemsView.js - 負責渲染項目列表、處理搜尋、過濾、右鍵選單
 import { collectionStore, UNTAGGED_TAG } from './store.js';
 import { tabAdapter } from '../tabAdapter.js';
+import { highlightAndScrollToItem } from './highlightHelper.js';
 
 // --- Local State for this view ---
 let currentTag = "All Items";
@@ -290,9 +291,12 @@ async function randomItem() {
 
     const listItem = document.getElementById(`item-${randomItem.id}`);
     if (listItem) {
-      listItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      listItem.classList.add('highlighted');
-      setTimeout(() => listItem.classList.remove('highlighted'), 2000);
+      highlightAndScrollToItem(listItem, {
+        duration: 3000,
+        scrollBehavior: 'smooth',
+        scrollBlock: 'center',
+        realignOnImageLoad: true
+      });
     }
   }
 }
