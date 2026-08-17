@@ -240,6 +240,40 @@
             gap: 5px;
             border: 1px solid #ccc;
         }
+        .image-input-group {
+            display: flex;
+            gap: 6px;
+        }
+        .image-preview-container {
+            margin-top: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px;
+            background-color: #f9f9f9;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+        }
+        .preview-thumb {
+            max-width: 90px;
+            max-height: 65px;
+            border-radius: 4px;
+            object-fit: cover;
+            background-color: #eee;
+            border: 1px solid #ddd;
+        }
+        .preview-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 11px;
+            color: #666;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .preview-status {
+            font-weight: 500;
+        }
         .view-footer {
             padding: 10px;
             border-top: 1px solid #eee;
@@ -321,7 +355,16 @@
         </div>
         <div class="form-group">
             <label for="itemImageUrlInput">Image URL</label>
-            <input type="url" id="itemImageUrlInput" placeholder="Leave empty to auto-detect">
+            <div class="image-input-group">
+                <input type="url" id="itemImageUrlInput" placeholder="Leave empty to auto-detect" style="flex-grow: 1;">
+                <button id="fetchImageButton" type="button" title="Fetch preview image from URL">Fetch</button>
+            </div>
+            <div id="imagePreviewContainer" class="image-preview-container" style="display: none;">
+                <img id="imagePreview" class="preview-thumb" alt="Preview">
+                <div class="preview-info">
+                    <span id="imagePreviewStatus" class="preview-status">Preview</span>
+                </div>
+            </div>
         </div>
         
         <div class="form-group">
