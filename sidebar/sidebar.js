@@ -1,4 +1,5 @@
 import { collectionStore } from './store.js';
+import { tabAdapter } from '../tabAdapter.js';
 import { initItemsView, displayItemsByTag, refreshItemsList } from './itemsView.js';
 import { initAddItemView, showAddItemView } from './addItemView.js';
 import { initManageTagsView, showManageTagsView, displayManageTagList } from './manageTagsView.js';
@@ -86,22 +87,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // --- Import/Export Logic ---
-  function exportData() {
+  async function exportData() {
     const dataToExport = collectionStore.exportData();
-    const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
     const filename = `collection_backup_${new Date().toISOString().split('T')[0]}.json`;
-
-    if (typeof chrome !== 'undefined' && chrome.downloads && chrome.downloads.download) {
-      chrome.downloads.download({ url: url, filename: filename, saveAs: true })
-        .then(() => URL.revokeObjectURL(url), () => URL.revokeObjectURL(url));
-    } else {
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
-    }
+    await tabAdapter.downloadJson(dataToExport, filename);
   }
 
   async function importData(event) {

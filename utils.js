@@ -1,4 +1,5 @@
 import { searchEngineStore, SearchEngineStore, MemoryStorageAdapter, ChromeStorageAdapter } from './searchEngineStore.js';
+import { tabAdapter } from './tabAdapter.js';
 
 export { searchEngineStore, SearchEngineStore, MemoryStorageAdapter, ChromeStorageAdapter };
 
@@ -22,17 +23,11 @@ export function rebuildContextMenus(store = searchEngineStore) {
 /**
  * Open a search engine URL based on selected text.
  */
-export function performSearch(query, engineOrId, currentTab, store = searchEngineStore) {
+export function performSearch(query, engineOrId, currentTab, store = searchEngineStore, navigationAdapter = tabAdapter) {
   const searchUrl = store.buildSearchUrl(query, engineOrId);
   if (!searchUrl) return;
 
-  if (typeof chrome !== 'undefined' && chrome.tabs) {
-    chrome.tabs.create({
-      url: searchUrl,
-      index: currentTab ? currentTab.index + 1 : undefined,
-      openerTabId: currentTab ? currentTab.id : undefined
-    });
-  }
+  navigationAdapter.openAdjacent(searchUrl, { tab: currentTab, active: true });
 }
 
 /**
