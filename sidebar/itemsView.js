@@ -1,5 +1,5 @@
 // itemsView.js - 負責渲染項目列表、處理搜尋、過濾、右鍵選單
-import { state, saveData } from './store.js';
+import { collectionStore } from './store.js';
 
 // --- Local State for this view ---
 let currentTag = "All Items";
@@ -27,25 +27,32 @@ export function initItemsView(injectedCallbacks) {
   actorFilterInput = document.getElementById('actorFilterInput');
   actorFilterDatalist = document.getElementById('actorFilterDatalist');
 
-  // [優化 3] 搜尋防抖：延遲執行 refreshItemsList
-  itemSearchInput.addEventListener('input', () => {
-    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-    searchDebounceTimer = setTimeout(() => {
+  // 搜尋防抖：延遲執行 refreshItemsList
+  if (itemSearchInput) {
+    itemSearchInput.addEventListener('input', () => {
+      if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(() => {
+        refreshItemsList();
+      }, 300);
+    });
+  }
+
+  const clearBtn = document.getElementById('clearSearchButton');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      if (itemSearchInput) itemSearchInput.value = '';
       refreshItemsList();
-    }, 300); // 延遲 300ms
-  });
+    });
+  }
 
-  document.getElementById('clearSearchButton').addEventListener('click', () => {
-    itemSearchInput.value = '';
-    refreshItemsList();
-  });
+  if (actorFilterInput) {
+    actorFilterInput.addEventListener('input', (e) => {
+      currentActorFilter = e.target.value.trim();
+      refreshItemsList();
+    });
+  }
 
-  actorFilterInput.addEventListener('input', (e) => {
-    currentActorFilter = e.target.value.trim();
-    refreshItemsList(); // Actor filter 通常選項較少，直接刷新尚可，也可加防抖
-  });
-
-  // [優化 1] 事件委派：統一在 itemList (父層) 監聽點擊
+  // 事件委派：統一在 itemList (父層) 監聽點擊
   setupListEventDelegation();
 
   document.addEventListener('click', removeCustomContextMenu);
@@ -57,20 +64,19 @@ export function initItemsView(injectedCallbacks) {
   if (openAllBtn) openAllBtn.addEventListener('click', openAllItems);
 }
 
-// [優化 1] 設置事件委派函數
+// 設置事件委派函數
 function setupListEventDelegation() {
+  if (!itemList) return;
+
   // 左鍵點擊：開啟連結
-  // [修改] 改為 async 以便等待 tabs.query
   itemList.addEventListener('click', async (e) => {
     const li = e.target.closest('.listItem');
     if (li) {
       const url = li.dataset.url;
-      if (url) {
-        // 獲取當前分頁資訊
+      if (url && typeof chrome !== 'undefined' && chrome.tabs) {
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        const currentTab = tabs[0];
+        const currentTab = tabs && tabs[0];
 
-        // 在當前分頁的下一個位置開啟，並設定 openerTabId 建立關聯
         chrome.tabs.create({
           url: url,
           index: currentTab ? currentTab.index + 1 : undefined,
@@ -86,12 +92,11 @@ function setupListEventDelegation() {
     if (li) {
       e.preventDefault();
       removeCustomContextMenu();
-      const itemId = li.dataset.id; // 從 data-id 獲取 ID
+      const itemId = li.dataset.id;
 
       const menu = createCustomContextMenu(itemId);
       document.body.appendChild(menu);
 
-      // 簡單的邊界檢查
       const menuHeight = menu.offsetHeight || 100;
       const windowHeight = window.innerHeight;
 
@@ -119,17 +124,10 @@ export function refreshItemsList() {
 // --- Internal Helper Functions ---
 
 function populateActorFilterOptions() {
-  const allActorsSet = new Set();
-  state.items.forEach(item => {
-    if (item.actors && Array.isArray(item.actors)) {
-      item.actors.forEach(a => allActorsSet.add(a));
-    }
-  });
-  const allActors = [...allActorsSet].sort();
+  const allActors = collectionStore.getAllActors();
 
   if (actorFilterDatalist) {
     actorFilterDatalist.innerHTML = '';
-    // DocumentFragment 這裡也可以用，雖然影響較小
     const fragment = document.createDocumentFragment();
     allActors.forEach(actor => {
       const option = document.createElement('option');
@@ -152,7 +150,8 @@ function populateTagFilterBar() {
   fragment.appendChild(untaggedBtn);
 
   // 2. 一般標籤按鈕
-  state.tags.forEach(tag => {
+  const tags = collectionStore.getTags();
+  tags.forEach(tag => {
     const button = createFilterButton(tag, activeFilters.includes(tag));
     button.addEventListener('click', () => toggleFilter(tag));
     fragment.appendChild(button);
@@ -191,7 +190,7 @@ function toggleFilter(filterKey) {
 }
 
 function getFilteredItems() {
-  let filtered = state.items;
+  let filtered = collectionStore.getItems();
 
   // 1. Tag Scope
   if (activeFilters.length > 0) {
@@ -206,7 +205,6 @@ function getFilteredItems() {
 
   // 2. Actor Filter
   if (currentActorFilter) {
-    // 預先轉小寫，雖然 JS 引擎很快，但在 filter 迴圈外處理固定的字串是好習慣
     const filterLower = currentActorFilter.toLowerCase();
     filtered = filtered.filter(item => {
       const actors = item.actors || [];
@@ -215,12 +213,11 @@ function getFilteredItems() {
   }
 
   // 3. Search Text
-  const searchTerm = itemSearchInput.value.toLowerCase();
+  const searchTerm = itemSearchInput ? itemSearchInput.value.toLowerCase().trim() : '';
   if (searchTerm) {
     filtered = filtered.filter(item => {
-      // 這裡如果 item 非常多，可以考慮在 item 物件中緩存一個 "searchString" 屬性
-      const titleMatch = item.title.toLowerCase().includes(searchTerm);
-      const urlMatch = item.url.toLowerCase().includes(searchTerm);
+      const titleMatch = item.title && item.title.toLowerCase().includes(searchTerm);
+      const urlMatch = item.url && item.url.toLowerCase().includes(searchTerm);
       const actors = item.actors || [];
       const actorMatch = actors.some(a => a.toLowerCase().includes(searchTerm));
       return titleMatch || urlMatch || actorMatch;
@@ -230,12 +227,11 @@ function getFilteredItems() {
 }
 
 function renderFilteredList() {
+  if (!itemList) return;
   const itemsToDisplay = getFilteredItems();
-  itemsToDisplay.sort((a, b) => b.addDate - a.addDate);
+  itemsToDisplay.sort((a, b) => (b.addDate || 0) - (a.addDate || 0));
 
   itemList.innerHTML = '';
-
-  // [優化 2] 使用 DocumentFragment 批次寫入 DOM
   const fragment = document.createDocumentFragment();
 
   itemsToDisplay.forEach(item => {
@@ -243,7 +239,6 @@ function renderFilteredList() {
     listItem.className = "listItem";
     listItem.id = `item-${item.id}`;
 
-    // [重要] 將資料綁定在 dataset，供事件委派使用
     listItem.dataset.id = item.id;
     listItem.dataset.url = item.url;
 
@@ -267,12 +262,11 @@ function renderFilteredList() {
       const itemImage = document.createElement('img');
       itemImage.className = 'item-image';
       itemImage.src = item.imageUrl;
-      itemImage.loading = "lazy"; // [額外優化] 圖片懶加載
+      itemImage.loading = "lazy";
       itemImage.onerror = (e) => { e.target.style.display = 'none'; };
       listItem.appendChild(itemImage);
     }
 
-    // 移除了個別的 addEventListener
     fragment.appendChild(listItem);
   });
 
@@ -293,12 +287,10 @@ function createCustomContextMenu(itemId) {
   const deleteItem = document.createElement('div');
   deleteItem.className = 'context-menu-item';
   deleteItem.innerText = 'Delete';
-  deleteItem.addEventListener('click', () => {
+  deleteItem.addEventListener('click', async () => {
     if (confirm("Are you sure you want to delete this item?")) {
-      const itemIndex = state.items.findIndex(i => i.id === itemId);
-      if (itemIndex > -1) {
-        state.items.splice(itemIndex, 1);
-        saveData();
+      const success = await collectionStore.deleteItem(itemId);
+      if (success) {
         refreshItemsList();
       }
     }
@@ -314,20 +306,18 @@ function removeCustomContextMenu() {
   if (existingMenu) existingMenu.remove();
 }
 
-// [修改] 讓 Open All 也在目前分頁後依序開啟
 async function openAllItems() {
   const itemsToOpen = getFilteredItems();
-  if (itemsToOpen.length > 0) {
+  if (itemsToOpen.length > 0 && typeof chrome !== 'undefined' && chrome.tabs) {
     if (confirm(`Open ${itemsToOpen.length} tabs?`)) {
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      const currentTab = tabs[0];
+      const currentTab = tabs && tabs[0];
       let startIndex = currentTab ? currentTab.index + 1 : undefined;
 
       itemsToOpen.forEach((item, i) => {
         chrome.tabs.create({
           url: item.url,
           active: false,
-          // 如果有找到當前分頁，就依序 +0, +1, +2 排下去，否則就預設(排最後)
           index: startIndex !== undefined ? startIndex + i : undefined,
           openerTabId: currentTab ? currentTab.id : undefined
         });
@@ -336,14 +326,13 @@ async function openAllItems() {
   }
 }
 
-// [修改] 讓 Random 也在目前分頁旁開啟
 async function randomItem() {
   const itemsToChooseFrom = getFilteredItems();
-  if (itemsToChooseFrom.length > 0) {
+  if (itemsToChooseFrom.length > 0 && typeof chrome !== 'undefined' && chrome.tabs) {
     const randomItem = itemsToChooseFrom[Math.floor(Math.random() * itemsToChooseFrom.length)];
 
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const currentTab = tabs[0];
+    const currentTab = tabs && tabs[0];
 
     chrome.tabs.create({
       url: randomItem.url,

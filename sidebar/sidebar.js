@@ -1,6 +1,6 @@
-import { loadData } from './store.js';
+import { collectionStore } from './store.js';
 import { initItemsView, displayItemsByTag, refreshItemsList } from './itemsView.js';
-import { initAddItemView, showAddItemView, isEditingMode } from './addItemView.js';
+import { initAddItemView, showAddItemView } from './addItemView.js';
 import { initManageTagsView, showManageTagsView, displayManageTagList } from './manageTagsView.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -43,29 +43,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-
   // --- Event Listeners (Main Navigation) ---
-  manageTagsButton.addEventListener('click', () => {
-    showView(manageTagsView);
-    showManageTagsView();
-  });
+  if (manageTagsButton) {
+    manageTagsButton.addEventListener('click', () => {
+      showView(manageTagsView);
+      showManageTagsView();
+    });
+  }
 
-  addItemButton.addEventListener('click', () => {
-    showView(addItemView);
-    showAddItemView(null); // 進入新增模式
-  });
+  if (addItemButton) {
+    addItemButton.addEventListener('click', () => {
+      showView(addItemView);
+      showAddItemView(null); // 進入新增模式
+    });
+  }
 
-  exportButton.addEventListener('click', exportData);
-  importButton.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', importData);
-
+  if (exportButton) exportButton.addEventListener('click', exportData);
+  if (importButton) importButton.addEventListener('click', () => fileInput && fileInput.click());
+  if (fileInput) fileInput.addEventListener('change', importData);
 
   // --- Navigation Logic ---
 
   function showView(viewToShow) {
     [itemsView, addItemView, manageTagsView].forEach(view => {
       if (view) {
-        // [重要修改] 使用 'flex' 而不是 'block'，以確保 CSS flex-grow 生效
         view.style.display = view === viewToShow ? 'flex' : 'none';
       }
     });
@@ -86,54 +87,63 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // --- Import/Export Logic ---
   function exportData() {
-    import('./store.js').then(({ state }) => {
-      const dataToExport = { items: state.items || [], tags: state.tags || [] };
-      const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const filename = `collection_backup_${new Date().toISOString().split('T')[0]}.json`;
+    const dataToExport = collectionStore.exportData();
+    const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const filename = `collection_backup_${new Date().toISOString().split('T')[0]}.json`;
+
+    if (typeof chrome !== 'undefined' && chrome.downloads && chrome.downloads.download) {
       chrome.downloads.download({ url: url, filename: filename, saveAs: true })
         .then(() => URL.revokeObjectURL(url), () => URL.revokeObjectURL(url));
-    });
+    } else {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
   }
 
-  function importData(event) {
-    const file = event.target.files[0];
+  async function importData(event) {
+    const file = event.target.files && event.target.files[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         try {
           const importedData = JSON.parse(e.target.result);
-          if (importedData.items && importedData.tags) {
+          if (importedData && Array.isArray(importedData.items) && Array.isArray(importedData.tags)) {
             if (confirm("Overwrite collections?")) {
-              import('./store.js').then(({ state, saveData }) => {
-                state.items = importedData.items;
-                state.tags = importedData.tags;
-                saveData();
+              const success = await collectionStore.importData(importedData);
+              if (success) {
                 displayMainLibrary();
-              });
+              } else {
+                alert("Failed to import collections.");
+              }
             }
-          } else { alert("Invalid format."); }
-        } catch (err) { alert("Error reading file."); }
+          } else {
+            alert("Invalid collection backup format.");
+          }
+        } catch (err) {
+          alert("Error reading backup file.");
+        }
       };
       reader.readAsText(file);
     }
-    fileInput.value = '';
+    if (fileInput) fileInput.value = '';
   }
 
-  // --- Storage Listener ---
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local') {
-      if (currentViewName === 'manage') {
-        displayManageTagList();
-      } else if (currentViewName === 'items') {
-        refreshItemsList();
-      }
+  // --- Store Subscription (Multi-window sync and internal event listener) ---
+  collectionStore.subscribe((event) => {
+    if (currentViewName === 'manage') {
+      displayManageTagList();
+    } else if (currentViewName === 'items') {
+      refreshItemsList();
     }
   });
 
   // --- Initial Load ---
   try {
-    await loadData();
+    await collectionStore.load();
     displayMainLibrary();
   } catch (e) {
     console.error("Failed to load data:", e);

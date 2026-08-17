@@ -1,5 +1,5 @@
 // addItemView.js - 負責新增與編輯項目的表單邏輯
-import { state, saveData } from './store.js';
+import { collectionStore } from './store.js';
 
 // --- DOM Elements ---
 let itemTitleInput, itemUrlInput, itemImageUrlInput;
@@ -70,7 +70,7 @@ export function showAddItemView(itemId = null) {
 
   if (itemId) {
     // --- 編輯模式 ---
-    const itemToEdit = state.items.find(i => i.id === itemId);
+    const itemToEdit = collectionStore.getItemById(itemId);
     if (!itemToEdit) return; // 找不到項目，可能已被刪除
 
     editingItemId = itemId;
@@ -93,29 +93,36 @@ export function showAddItemView(itemId = null) {
     if (deleteItemButton) deleteItemButton.style.display = 'none';
 
     // 從當前分頁抓取資訊
-    chrome.tabs.query({ active: true, currentWindow: true }).then(tabs => {
-      const currentTab = tabs[0];
-      if (!currentTab) return;
+    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
+      chrome.tabs.query({ active: true, currentWindow: true }).then(tabs => {
+        const currentTab = tabs && tabs[0];
+        if (!currentTab) return;
 
-      if (itemTitleInput) itemTitleInput.value = currentTab.title;
-      if (itemUrlInput) itemUrlInput.value = currentTab.url;
+        if (itemTitleInput) itemTitleInput.value = currentTab.title || '';
+        if (itemUrlInput) itemUrlInput.value = currentTab.url || '';
 
-      // 檢查是否已存在
-      const existingItem = state.items.find(i => i.url === currentTab.url);
-      if (existingItem) {
-        populateTagSelector(existingItem.tags || []);
-        if (itemImageUrlInput) itemImageUrlInput.value = existingItem.imageUrl || '';
-        currentEditingActors = existingItem.actors ? [...existingItem.actors] : [];
-      } else {
-        populateTagSelector([]);
-        currentEditingActors = [];
-      }
+        // 檢查是否已存在
+        const existingItem = currentTab.url ? collectionStore.getItemByUrl(currentTab.url) : null;
+        if (existingItem) {
+          populateTagSelector(existingItem.tags || []);
+          if (itemImageUrlInput) itemImageUrlInput.value = existingItem.imageUrl || '';
+          currentEditingActors = existingItem.actors ? [...existingItem.actors] : [];
+        } else {
+          populateTagSelector([]);
+          currentEditingActors = [];
+        }
 
+        renderActorChips();
+
+        if (currentTab.url) {
+          tryFetchImage(currentTab.url);
+        }
+      });
+    } else {
+      populateTagSelector([]);
+      currentEditingActors = [];
       renderActorChips();
-
-      // 無論是否已存在，嘗試抓取圖片
-      tryFetchImage(currentTab.url);
-    });
+    }
   }
 
   renderActorChips();
@@ -131,19 +138,20 @@ export function isEditingMode() {
 // --- Internal Logic ---
 
 function tryFetchImage(url) {
-  chrome.runtime.sendMessage({ action: 'getImage', url: url })
-    .then(response => {
-      if (response && response.imageUrl) {
-        // [Reverted] 只有當輸入框為空時才填入，避免覆蓋使用者的手動輸入
-        if (itemImageUrlInput && !itemImageUrlInput.value) {
-          itemImageUrlInput.value = response.imageUrl;
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+    chrome.runtime.sendMessage({ action: 'getImage', url: url })
+      .then(response => {
+        if (response && response.imageUrl) {
+          if (itemImageUrlInput && !itemImageUrlInput.value) {
+            itemImageUrlInput.value = response.imageUrl;
+          }
         }
-      }
-    })
-    .catch(error => console.error("Error fetching image:", error));
+      })
+      .catch(error => console.error("Error fetching image:", error));
+  }
 }
 
-function handleSave() {
+async function handleSave() {
   const title = itemTitleInput ? itemTitleInput.value.trim() : '';
   const url = itemUrlInput ? itemUrlInput.value.trim() : '';
   const imageUrl = itemImageUrlInput ? itemImageUrlInput.value.trim() : '';
@@ -154,44 +162,30 @@ function handleSave() {
   const selectedTags = Array.from(existingTagsContainer.querySelectorAll('.tag-button.selected'))
     .map(btn => btn.dataset.tag);
 
-  let existingItem = editingItemId ? state.items.find(i => i.id === editingItemId) : state.items.find(i => i.url === url);
-
-  if (existingItem) {
-    existingItem.title = title;
-    existingItem.url = url;
-    existingItem.tags = selectedTags;
-    existingItem.imageUrl = imageUrl || null;
-    existingItem.actors = actors;
-  } else {
-    const newItem = {
-      id: `item-${Date.now()}`,
+  try {
+    await collectionStore.saveItem({
+      id: editingItemId,
       title,
       url,
       tags: selectedTags,
-      addDate: Date.now(),
       imageUrl: imageUrl || null,
       actors: actors
-    };
-    state.items.push(newItem);
-  }
+    });
 
-  // 儲存並通知 Controller
-  saveData().then(() => {
     editingItemId = null;
     if (callbacks.onSave) callbacks.onSave();
-  });
+  } catch (err) {
+    console.error("Failed to save item:", err);
+  }
 }
 
-function handleDelete() {
+async function handleDelete() {
   if (!editingItemId) return;
   if (confirm("Are you sure you want to delete this item?")) {
-    const itemIndex = state.items.findIndex(i => i.id === editingItemId);
-    if (itemIndex > -1) {
-      state.items.splice(itemIndex, 1);
-      saveData().then(() => {
-        editingItemId = null;
-        if (callbacks.onDelete) callbacks.onDelete();
-      });
+    const success = await collectionStore.deleteItem(editingItemId);
+    if (success) {
+      editingItemId = null;
+      if (callbacks.onDelete) callbacks.onDelete();
     }
   }
 }
@@ -199,7 +193,7 @@ function handleDelete() {
 function handleAddActor() {
   const val = itemActorInput ? itemActorInput.value.trim() : '';
   if (val) {
-    const names = val.split(',').map(s => s.trim()).filter(s => s);
+    const names = val.split(',').map(s => s.trim()).filter(Boolean);
     names.forEach(name => {
       if (!currentEditingActors.includes(name)) {
         currentEditingActors.push(name);
@@ -238,11 +232,7 @@ function renderActorChips() {
 function populateActorSuggestions() {
   if (!actorSuggestions) return;
   actorSuggestions.innerHTML = '';
-  const allActorsSet = new Set();
-  state.items.forEach(item => {
-    if (item.actors) item.actors.forEach(a => allActorsSet.add(a));
-  });
-  const allActors = [...allActorsSet].sort();
+  const allActors = collectionStore.getAllActors();
 
   allActors.forEach(actor => {
     const option = document.createElement('option');
@@ -254,7 +244,8 @@ function populateActorSuggestions() {
 function populateTagSelector(selectedTags) {
   if (!existingTagsContainer) return;
   existingTagsContainer.innerHTML = '';
-  state.tags.forEach(tag => {
+  const tags = collectionStore.getTags();
+  tags.forEach(tag => {
     const button = document.createElement('button');
     button.className = 'tag-button';
     button.innerText = tag;

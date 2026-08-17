@@ -1,5 +1,5 @@
 // manageTagsView.js - 負責標籤管理（新增、改名、刪除、排序）
-import { state, saveData } from './store.js';
+import { collectionStore } from './store.js';
 
 // --- DOM Elements ---
 let manageTagList, newTagInput, addNewTagButton, closeManageTagsButton;
@@ -18,7 +18,7 @@ export function initManageTagsView(injectedCallbacks) {
   addNewTagButton = document.getElementById('addNewTagButton');
   closeManageTagsButton = document.getElementById('closeManageTagsButton');
 
-  addNewTagButton.addEventListener('click', addNewTag);
+  addNewTagButton.addEventListener('click', handleAddNewTag);
   closeManageTagsButton.addEventListener('click', () => {
     if (callbacks.onClose) callbacks.onClose();
   });
@@ -35,8 +35,11 @@ export function showManageTagsView() {
  * 渲染列表 (公開函數，供 Controller 在 storage 更新時呼叫)
  */
 export function displayManageTagList() {
+  if (!manageTagList) return;
   manageTagList.innerHTML = '';
-  state.tags.forEach(tag => {
+  
+  const tags = collectionStore.getTags();
+  tags.forEach(tag => {
     const li = document.createElement('li');
     li.className = 'manage-tag-item';
     li.dataset.tag = tag;
@@ -64,7 +67,7 @@ export function displayManageTagList() {
 
     const deleteButton = document.createElement('button');
     deleteButton.innerText = 'Delete';
-    deleteButton.addEventListener('click', () => deleteTag(tag));
+    deleteButton.addEventListener('click', () => handleDeleteTag(tag));
 
     actionsDiv.appendChild(renameButton);
     actionsDiv.appendChild(deleteButton);
@@ -78,54 +81,38 @@ export function displayManageTagList() {
 
 // --- Internal Logic ---
 
-function addNewTag() {
+async function handleAddNewTag() {
   const newTagName = newTagInput.value.trim();
-  if (newTagName && !state.tags.includes(newTagName)) {
-    state.tags.push(newTagName);
-    saveData();
+  if (!newTagName) return;
+
+  const success = await collectionStore.addTag(newTagName);
+  if (success) {
     displayManageTagList();
     newTagInput.value = '';
+  } else {
+    alert(`Tag "${newTagName}" already exists or is invalid.`);
   }
 }
 
-function promptRenameTag(oldTag) {
+async function promptRenameTag(oldTag) {
   const newTagName = prompt(`Rename tag "${oldTag}" to:`, oldTag);
   if (newTagName && newTagName.trim() !== oldTag) {
-    renameTag(oldTag, newTagName.trim());
-  }
-}
-
-function renameTag(oldTag, newTag) {
-  if (state.tags.includes(newTag)) {
-    alert(`Tag "${newTag}" already exists.`);
-    return;
-  }
-  const tagIndex = state.tags.indexOf(oldTag);
-  if (tagIndex > -1) {
-    state.tags[tagIndex] = newTag;
-  }
-  // 更新所有 Item 中的標籤
-  state.items.forEach(item => {
-    if (item.tags && item.tags.includes(oldTag)) {
-      const itemTagIndex = item.tags.indexOf(oldTag);
-      item.tags[itemTagIndex] = newTag;
+    const trimmed = newTagName.trim();
+    const success = await collectionStore.renameTag(oldTag, trimmed);
+    if (success) {
+      displayManageTagList();
+    } else {
+      alert(`Tag "${trimmed}" already exists or could not be renamed.`);
     }
-  });
-  saveData();
-  displayManageTagList();
+  }
 }
 
-function deleteTag(tagToDelete) {
+async function handleDeleteTag(tagToDelete) {
   if (confirm(`Are you sure you want to delete the tag "${tagToDelete}"? This will remove the tag from all items.`)) {
-    state.tags = state.tags.filter(tag => tag !== tagToDelete);
-    // 移除 Item 中的標籤
-    state.items.forEach(item => {
-      if (item.tags) {
-        item.tags = item.tags.filter(tag => tag !== tagToDelete);
-      }
-    });
-    saveData();
-    displayManageTagList();
+    const success = await collectionStore.deleteTag(tagToDelete);
+    if (success) {
+      displayManageTagList();
+    }
   }
 }
 
@@ -145,18 +132,18 @@ function handleDragOver(e) {
   }
 }
 
-function handleDrop(e) {
+async function handleDrop(e) {
   e.preventDefault();
   const target = e.target.closest('.manage-tag-item');
   if (target && target.dataset.tag !== draggedTag) {
-    const fromIndex = state.tags.indexOf(draggedTag);
-    const toIndex = state.tags.indexOf(target.dataset.tag);
+    const tags = collectionStore.getTags();
+    const fromIndex = tags.indexOf(draggedTag);
+    const toIndex = tags.indexOf(target.dataset.tag);
 
-    const [movedTag] = state.tags.splice(fromIndex, 1);
-    state.tags.splice(toIndex, 0, movedTag);
-
-    saveData();
-    displayManageTagList();
+    if (fromIndex !== -1 && toIndex !== -1) {
+      await collectionStore.reorderTags(fromIndex, toIndex);
+      displayManageTagList();
+    }
   }
 }
 
