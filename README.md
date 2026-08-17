@@ -14,7 +14,7 @@ Fully engineered under the **Manifest V3 (MV3)** standard, it boasts native comp
 *   **Background Cover Scraper**: Uses background service workers to query pages and fetch preview covers automatically.
 *   **Tag & Actor Management**: Categorize collections using multi-tag select structures, plus support for autocomplete tags and custom creator/model name tags.
 *   **Regex-Powered Search Shortcuts**: A dedicated settings popup to create, read, update, and delete (CRUD) custom context menu search shortcuts. Features advanced regular expression matching for query extraction and target URL template replacements.
-*   **Data Portability**: Full backup and restore capabilities allowing one-click export and import of your collections to and from clean JSON files.
+*   **Data Portability**: Full unified backup and restore capabilities allowing one-click export and import of your collections, tags, and custom search shortcut engines to and from clean JSON files.
 
 ---
 
@@ -26,13 +26,16 @@ The repository is structured logically to separate concern, enforce clean module
 .
 ├── background.js          # Event-driven background service worker (scrapers, communication)
 ├── utils.js               # Search shortcut logic & dynamic context menu managers
+├── searchEngineStore.js   # Deep module for search shortcut persistence & query compilation
+├── tabAdapter.js          # Unified browser tab navigation & JSON download seam
 ├── manifest.json          # Main Manifest V3 configuration (dual side-panel & actions)
 ├── popup/                 # Search Shortcut Settings Popup
 │   ├── popup.html         # Light-aesthetic layout for managing search templates
 │   └── popup.js           # Settings CRUD controller & storage handlers
 └── sidebar/               # Main Collection Sidebar Module
     ├── sidebar.html       # Sidebar visual UI with flex designs
-    ├── sidebar.js         # Navigation router and import/export coordinator
+    ├── sidebar.js         # Navigation router and view controller
+    ├── backupCoordinator.js # Unified backup export/import coordinator
     ├── store.js           # Core state management with chrome.storage.local persistence
     ├── itemsView.js       # List layout renderer, sorting, search, and context menu handlers
     ├── addItemView.js     # Collection creator and editor form controller

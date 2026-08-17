@@ -28,11 +28,20 @@ export class MemoryTabAdapter {
     return newTab;
   }
 
-  async download({ content, filename, mimeType = 'application/json' }) {
+  async download({ content, filename, mimeType = 'application/json', data = null }) {
+    let parsedData = data;
+    if (!parsedData && typeof content === 'string' && (mimeType.includes('json') || (filename && filename.endsWith('.json')))) {
+      try {
+        parsedData = JSON.parse(content);
+      } catch (e) {
+        // ignore non-json string
+      }
+    }
     const record = {
       content,
       filename,
       mimeType,
+      data: parsedData,
       timestamp: Date.now()
     };
     this.downloads.push(record);

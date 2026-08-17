@@ -1,5 +1,7 @@
 import { collectionStore } from './store.js';
+import { searchEngineStore } from '../searchEngineStore.js';
 import { tabAdapter } from '../tabAdapter.js';
+import { exportBackupFile, restoreUnifiedBackup } from './backupCoordinator.js';
 import { initItemsView, displayItemsByTag, refreshItemsList } from './itemsView.js';
 import { initAddItemView, showAddItemView } from './addItemView.js';
 import { initManageTagsView, showManageTagsView, displayManageTagList } from './manageTagsView.js';
@@ -88,9 +90,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // --- Import/Export Logic ---
   async function exportData() {
-    const dataToExport = collectionStore.exportData();
-    const filename = `collection_backup_${new Date().toISOString().split('T')[0]}.json`;
-    await tabAdapter.downloadJson(dataToExport, filename);
+    await exportBackupFile(collectionStore, searchEngineStore, tabAdapter);
   }
 
   async function importData(event) {
@@ -100,17 +100,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       reader.onload = async (e) => {
         try {
           const importedData = JSON.parse(e.target.result);
-          if (importedData && Array.isArray(importedData.items) && Array.isArray(importedData.tags)) {
-            if (confirm("Overwrite collections?")) {
-              const success = await collectionStore.importData(importedData);
-              if (success) {
-                displayMainLibrary();
-              } else {
-                alert("Failed to import collections.");
-              }
+          const hasSearchEngines = importedData && Array.isArray(importedData.searchEngines);
+          const confirmMsg = hasSearchEngines
+            ? "Overwrite collections and search shortcuts?"
+            : "Overwrite collections?";
+
+          if (confirm(confirmMsg)) {
+            const result = await restoreUnifiedBackup(importedData, { collectionStore, searchEngineStore });
+            if (result.success) {
+              displayMainLibrary();
+            } else {
+              alert(`Failed to import backup: ${result.error || 'Invalid format'}`);
             }
-          } else {
-            alert("Invalid collection backup format.");
           }
         } catch (err) {
           alert("Error reading backup file.");
