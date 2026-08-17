@@ -223,6 +223,7 @@ export class CollectionStore {
       tags = [],
       untagged = false,
       actor = '',
+      actors = [],
       search = '',
       sortBy = 'addDate',
       sortOrder = 'desc'
@@ -244,12 +245,24 @@ export class CollectionStore {
       }
     }
 
-    // 2. 演員過濾 (Actor Substring Match)
-    const cleanActor = (actor || '').trim().toLowerCase();
-    if (cleanActor) {
+    // 2. 演員過濾 (Actor Substring Match & Multi-actor intersection)
+    let filterActors = [];
+    if (Array.isArray(actors)) {
+      filterActors = actors.map(a => (a ? String(a).trim().toLowerCase() : '')).filter(Boolean);
+    }
+    if (actor && typeof actor === 'string') {
+      const cleanSingle = actor.trim().toLowerCase();
+      if (cleanSingle && !filterActors.includes(cleanSingle)) {
+        filterActors.push(cleanSingle);
+      }
+    }
+
+    if (filterActors.length > 0) {
       results = results.filter(item => {
-        const actors = Array.isArray(item.actors) ? item.actors : [];
-        return actors.some(a => (a || '').toLowerCase().includes(cleanActor));
+        const itemActors = Array.isArray(item.actors) ? item.actors : [];
+        return filterActors.every(target =>
+          itemActors.some(a => (a || '').toLowerCase().includes(target))
+        );
       });
     }
 

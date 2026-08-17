@@ -6,11 +6,13 @@ import { highlightAndScrollToItem } from './highlightHelper.js';
 // --- Local State for this view ---
 let currentTag = "All Items";
 let activeFilters = [];
+let activeActorFilters = [];
 let currentActorFilter = "";
 
 // --- DOM Elements ---
 let itemList, itemSearchInput, tagFilterContainer;
 let actorFilterContainer, actorFilterInput, actorFilterDatalist;
+let addActorFilterButton, selectedActorFiltersContainer;
 let callbacks = {};
 let searchDebounceTimer = null; // 用於搜尋防抖
 
@@ -26,6 +28,8 @@ export function initItemsView(injectedCallbacks) {
   actorFilterContainer = document.getElementById('actorFilterContainer');
   actorFilterInput = document.getElementById('actorFilterInput');
   actorFilterDatalist = document.getElementById('actorFilterDatalist');
+  addActorFilterButton = document.getElementById('addActorFilterButton');
+  selectedActorFiltersContainer = document.getElementById('selectedActorFiltersContainer');
 
   // 搜尋防抖：延遲執行 refreshItemsList
   if (itemSearchInput) {
@@ -50,6 +54,17 @@ export function initItemsView(injectedCallbacks) {
       currentActorFilter = e.target.value.trim();
       refreshItemsList();
     });
+
+    actorFilterInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleAddActorFilter();
+      }
+    });
+  }
+
+  if (addActorFilterButton) {
+    addActorFilterButton.addEventListener('click', handleAddActorFilter);
   }
 
   // 事件委派：統一在 itemList (父層) 監聽點擊
@@ -104,6 +119,7 @@ export function displayItemsByTag(tag) {
   currentTag = tag;
   populateTagFilterBar();
   populateActorFilterOptions();
+  renderActorFilterChips();
   refreshItemsList();
 }
 
@@ -112,6 +128,58 @@ export function refreshItemsList() {
 }
 
 // --- Internal Helper Functions ---
+
+function handleAddActorFilter() {
+  const val = actorFilterInput ? actorFilterInput.value.trim() : '';
+  if (!val) return;
+
+  const names = val.split(',').map(s => s.trim()).filter(Boolean);
+  names.forEach(name => {
+    if (!activeActorFilters.includes(name)) {
+      activeActorFilters.push(name);
+    }
+  });
+
+  if (actorFilterInput) actorFilterInput.value = '';
+  currentActorFilter = '';
+  renderActorFilterChips();
+  refreshItemsList();
+}
+
+function renderActorFilterChips() {
+  if (!selectedActorFiltersContainer) return;
+  selectedActorFiltersContainer.innerHTML = '';
+
+  if (activeActorFilters.length === 0) {
+    selectedActorFiltersContainer.style.display = 'none';
+    return;
+  }
+
+  selectedActorFiltersContainer.style.display = 'flex';
+  activeActorFilters.forEach(actor => {
+    const chip = document.createElement('span');
+    chip.className = 'actor-chip';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.innerText = actor;
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'remove-actor-filter';
+    removeBtn.innerHTML = '&times;';
+    removeBtn.title = 'Remove actor filter';
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      activeActorFilters = activeActorFilters.filter(a => a !== actor);
+      renderActorFilterChips();
+      refreshItemsList();
+    });
+
+    chip.appendChild(nameSpan);
+    chip.appendChild(removeBtn);
+    selectedActorFiltersContainer.appendChild(chip);
+  });
+}
 
 function populateActorFilterOptions() {
   const allActors = collectionStore.getAllActors();
@@ -181,9 +249,13 @@ function toggleFilter(filterKey) {
 
 function getFilteredItems() {
   const searchTerm = itemSearchInput ? itemSearchInput.value : '';
+  const actorsToQuery = [...activeActorFilters];
+  if (currentActorFilter && !actorsToQuery.includes(currentActorFilter)) {
+    actorsToQuery.push(currentActorFilter);
+  }
   return collectionStore.queryItems({
     tags: activeFilters,
-    actor: currentActorFilter,
+    actors: actorsToQuery,
     search: searchTerm,
     sortBy: 'addDate',
     sortOrder: 'desc'
@@ -280,9 +352,13 @@ async function openAllItems() {
 
 async function randomItem() {
   const searchTerm = itemSearchInput ? itemSearchInput.value : '';
+  const actorsToQuery = [...activeActorFilters];
+  if (currentActorFilter && !actorsToQuery.includes(currentActorFilter)) {
+    actorsToQuery.push(currentActorFilter);
+  }
   const randomItem = collectionStore.getRandomItem({
     tags: activeFilters,
-    actor: currentActorFilter,
+    actors: actorsToQuery,
     search: searchTerm
   });
 

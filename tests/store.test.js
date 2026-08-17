@@ -293,6 +293,46 @@ describe('CollectionStore (Deep Module)', () => {
       assert.strictEqual(noMatch.length, 0);
     });
 
+    it('filters items by multiple actors using intersection logic', () => {
+      // Single actor in array
+      const danResults = store.queryItems({ actors: ['Dan Abramov'] });
+      assert.strictEqual(danResults.length, 2);
+      assert.ok(danResults.some(i => i.title === 'React Documentation & Tutorial'));
+      assert.ok(danResults.some(i => i.title === 'Node.js Backend Guide'));
+
+      // Multiple actors - intersection: must contain all specified actors
+      const bothResults = store.queryItems({ actors: ['Dan Abramov', 'Ryan Dahl'] });
+      assert.strictEqual(bothResults.length, 1);
+      assert.strictEqual(bothResults[0].title, 'Node.js Backend Guide');
+
+      // Case-insensitive substring matching across multiple actors
+      const subResults = store.queryItems({ actors: ['dan', 'ryan'] });
+      assert.strictEqual(subResults.length, 1);
+      assert.strictEqual(subResults[0].title, 'Node.js Backend Guide');
+
+      // Mutually exclusive actors return empty
+      const noIntersection = store.queryItems({ actors: ['Dan Abramov', 'Guido van Rossum'] });
+      assert.strictEqual(noIntersection.length, 0);
+    });
+
+    it('handles edge cases in actors filtering (empty array, null/whitespace items, non-existent actors)', () => {
+      // Empty actors array returns all items
+      const emptyResults = store.queryItems({ actors: [] });
+      assert.strictEqual(emptyResults.length, 4);
+
+      // Whitespace and falsy items are safely filtered out
+      const whitespaceResults = store.queryItems({ actors: ['  ', null, undefined] });
+      assert.strictEqual(whitespaceResults.length, 4);
+
+      // Mixed valid and whitespace actors
+      const mixedResults = store.queryItems({ actors: ['Dan', '   '] });
+      assert.strictEqual(mixedResults.length, 2);
+
+      // Non-existent actor
+      const noMatch = store.queryItems({ actors: ['non-existent-actor'] });
+      assert.strictEqual(noMatch.length, 0);
+    });
+
     it('performs fulltext search matching across title, url, and actor names', () => {
       // Match by title
       const titleMatch = store.queryItems({ search: 'machine' });
@@ -321,6 +361,24 @@ describe('CollectionStore (Deep Module)', () => {
       assert.strictEqual(results[0].title, 'Node.js Backend Guide');
     });
 
+    it('combines tags, multiple actors, and search criteria simultaneously', () => {
+      const results = store.queryItems({
+        tags: ['JavaScript'],
+        actors: ['Dan', 'Ryan'],
+        search: 'guide'
+      });
+
+      assert.strictEqual(results.length, 1);
+      assert.strictEqual(results[0].title, 'Node.js Backend Guide');
+
+      // Tag mismatch with multiple actors
+      const mismatch = store.queryItems({
+        tags: ['Frontend'],
+        actors: ['Dan', 'Ryan']
+      });
+      assert.strictEqual(mismatch.length, 0);
+    });
+
     it('supports custom sorting order (asc vs desc)', () => {
       const ascResults = store.queryItems({ sortBy: 'addDate', sortOrder: 'asc' });
       assert.strictEqual(ascResults[0].title, 'React Documentation & Tutorial'); // addDate: 1000
@@ -334,6 +392,11 @@ describe('CollectionStore (Deep Module)', () => {
 
       const randomEmpty = store.getRandomItem({ search: 'nonexistent-xyz' });
       assert.strictEqual(randomEmpty, null);
+
+      // Multi-actor random item
+      const randomMultiActor = store.getRandomItem({ actors: ['Dan Abramov', 'Ryan Dahl'] });
+      assert.ok(randomMultiActor);
+      assert.strictEqual(randomMultiActor.title, 'Node.js Backend Guide');
     });
   });
 
