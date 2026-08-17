@@ -1,4 +1,5 @@
 import { initializeSearchShortcuts } from './utils.js';
+import { collectionStore } from './sidebar/store.js';
 
 initializeSearchShortcuts();
 
@@ -144,3 +145,168 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
     }
   });
 }
+
+/**
+ * 檢查是否為可收藏的一般網頁 URL (排除 chrome://, about:, file:// 等非 http/https 頁面)
+ * @param {string} url 
+ * @returns {boolean}
+ */
+export function isValidWebUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  return url.startsWith('http://') || url.startsWith('https://');
+}
+
+/**
+ * 注入至網頁 DOM 中的浮動 Toast 提示函式
+ * @param {string} message 
+ * @param {boolean} isExisting 
+ */
+export function inPageToast(message, isExisting) {
+  const TOAST_ID = '__collection_ext_toast__';
+  const existingToast = document.getElementById(TOAST_ID);
+  if (existingToast) {
+    existingToast.remove();
+  }
+
+  const toast = document.createElement('div');
+  toast.id = TOAST_ID;
+  toast.innerText = message;
+
+  Object.assign(toast.style, {
+    position: 'fixed',
+    top: '20px',
+    right: '20px',
+    zIndex: '2147483647',
+    padding: '10px 18px',
+    background: isExisting ? 'rgba(30, 64, 175, 0.94)' : 'rgba(16, 185, 129, 0.94)',
+    backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)',
+    color: '#ffffff',
+    fontSize: '13px',
+    fontWeight: '500',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    borderRadius: '8px',
+    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.1)',
+    transition: 'opacity 0.25s ease, transform 0.25s ease',
+    opacity: '0',
+    transform: 'translateY(-10px) scale(0.96)',
+    pointerEvents: 'none'
+  });
+
+  document.body.appendChild(toast);
+
+  requestAnimationFrame(() => {
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateY(0) scale(1)';
+  });
+
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateY(-10px) scale(0.96)';
+    setTimeout(() => toast.remove(), 260);
+  }, 2000);
+}
+
+/**
+ * 顯示保存成功的視覺反饋 (Badge 圖示與網頁內嵌 Toast)
+ * @param {Object} tab 
+ * @param {Object} options 
+ */
+export async function showSaveFeedback(tab, { isExisting = false, title = '' } = {}) {
+  if (!tab || !tab.id) return;
+
+  // 1. 擴充圖示 Badge 提示
+  if (typeof chrome !== 'undefined' && chrome.action && chrome.action.setBadgeText) {
+    try {
+      chrome.action.setBadgeText({ text: '✓', tabId: tab.id });
+      chrome.action.setBadgeBackgroundColor({
+        color: isExisting ? '#2563EB' : '#10B981',
+        tabId: tab.id
+      });
+      setTimeout(() => {
+        try {
+          chrome.action.setBadgeText({ text: '', tabId: tab.id });
+        } catch (e) {}
+      }, 2000);
+    } catch (e) {}
+  }
+
+  // 2. 網頁內嵌浮動 Toast HUD 提示
+  if (typeof chrome !== 'undefined' && chrome.scripting && chrome.scripting.executeScript) {
+    try {
+      const displayTitle = title ? (title.length > 32 ? title.slice(0, 32) + '...' : title) : 'Page';
+      const msg = isExisting ? `✓ 已更新收藏：${displayTitle}` : `✓ 已收藏至 Collection：${displayTitle}`;
+
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: inPageToast,
+        args: [msg, isExisting]
+      });
+    } catch (e) {
+      // 忽略受保護網頁 (例如 chrome:// 頁面或 Chrome Web Store) 的腳本注入錯誤
+    }
+  }
+}
+
+/**
+ * 直接保存作用中分頁至 Collection (供快捷鍵或 Context Menu 呼叫)
+ * @param {Object|null} tab - 目標分頁物件，為空時自動查詢當前作用中分頁
+ * @param {Object} store - CollectionStore 實例
+ * @returns {Promise<Object>}
+ */
+export async function saveActiveTabDirectly(tab = null, store = collectionStore) {
+  let targetTab = tab;
+  if (!targetTab && typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    targetTab = tabs && tabs[0] ? tabs[0] : null;
+  }
+
+  if (!targetTab || !isValidWebUrl(targetTab.url)) {
+    return { success: false, reason: 'invalid_url' };
+  }
+
+  if (!store.isLoaded) {
+    await store.load();
+  }
+
+  const existingItem = store.getItemByUrl(targetTab.url);
+  const imageUrl = (existingItem && existingItem.imageUrl)
+    ? existingItem.imageUrl
+    : await getImageForUrl(targetTab.url);
+
+  const title = (targetTab.title && targetTab.title.trim()) || existingItem?.title || targetTab.url;
+
+  const savedItem = await store.saveItem({
+    id: existingItem ? existingItem.id : undefined,
+    title: title,
+    url: targetTab.url,
+    imageUrl: imageUrl || null,
+    tags: existingItem ? existingItem.tags : [],
+    actors: existingItem ? existingItem.actors : []
+  });
+
+  await showSaveFeedback(targetTab, {
+    isExisting: !!existingItem,
+    title: savedItem.title
+  });
+
+  return {
+    success: true,
+    item: savedItem,
+    isExisting: !!existingItem
+  };
+}
+
+// 監聽鍵盤快捷鍵 (chrome.commands)
+if (typeof chrome !== 'undefined' && chrome.commands && chrome.commands.onCommand) {
+  chrome.commands.onCommand.addListener(async (command) => {
+    if (command === 'save_active_tab') {
+      try {
+        await saveActiveTabDirectly();
+      } catch (err) {
+        console.error('[QuickSave] Error saving active tab:', err);
+      }
+    }
+  });
+}
+

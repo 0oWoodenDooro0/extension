@@ -9,6 +9,7 @@ Fully engineered under the **Manifest V3 (MV3)** standard, it boasts native comp
 ## 🚀 Key Features
 
 *   **Dual-Sidebar Integration**: Offers a responsive, premium side-panel experience matching your browser's design. Opens as a native Side Panel in Chrome and a custom Sidebar in Firefox.
+*   **One-Key Fast Collection (`Alt+Shift+S`)**: Global keyboard shortcut to save the active webpage into Collection instantly without opening the sidebar, featuring an in-page floating toast HUD and extension badge indicator.
 *   **Active Tab Collector**: One-click extraction of the active page's Title and URL, instantly populating your item collection.
 *   **Background Cover Scraper**: Uses background service workers to query pages and fetch preview covers automatically.
 *   **Tag & Actor Management**: Categorize collections using multi-tag select structures, plus support for autocomplete tags and custom creator/model name tags.
@@ -73,6 +74,16 @@ The Search Shortcuts settings allow you to select text on any webpage, right-cli
 | **Google Search** | `https://www.google.com/search?q={query}` | *(None)* | *(None)* | `Antigravity AI` | `https://www.google.com/search?q=Antigravity%20AI` |
 
 *Use `{id}` or `{query}` as template placeholders in your URL definitions. Selected text is automatically formatted and safely URI-encoded at runtime.*
+ 
+---
+
+## ⌨️ Keyboard Shortcuts
+
+| Action | Default Shortcut (Win/Linux) | Default Shortcut (macOS) | Customization Path |
+| :--- | :--- | :--- | :--- |
+| **Save Active Webpage** | `Alt + Shift + S` | `Option + Shift + S` | `chrome://extensions/shortcuts` |
+
+*When triggered, a floating toast HUD will confirm the save on the current page, and the extension icon will display a green checkmark (`✓`) badge.*
 
 ---
 

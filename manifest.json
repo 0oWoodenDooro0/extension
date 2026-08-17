@@ -38,5 +38,14 @@
   "action": {
     "default_title": "Search Shortcuts Settings",
     "default_popup": "popup/popup.html"
+  },
+  "commands": {
+    "save_active_tab": {
+      "suggested_key": {
+        "default": "Alt+Shift+S",
+        "mac": "Alt+Shift+S"
+      },
+      "description": "Quickly save current active tab to Collection"
+    }
   }
 }
