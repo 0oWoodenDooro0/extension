@@ -1,6 +1,6 @@
-document.addEventListener("DOMContentLoaded", async () => {
-    let searchEngines = [];
+import { searchEngineStore } from '../searchEngineStore.js';
 
+document.addEventListener("DOMContentLoaded", async () => {
     // UI Elements
     const listView = document.getElementById("listView");
     const formView = document.getElementById("formView");
@@ -20,21 +20,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     const cancelBtn = document.getElementById("cancelBtn");
     const saveBtn = document.getElementById("saveBtn");
 
-    // Load and Initialize Settings
-    async function loadSettings() {
-        const data = await chrome.storage.local.get("searchEngines");
-        if (data.searchEngines) {
-            searchEngines = data.searchEngines;
-        } else {
-            searchEngines = [];
-            await chrome.storage.local.set({ searchEngines });
-        }
-        renderList();
-    }
-
     // Render Search Shortcut Cards
     function renderList() {
         shortcutsList.innerHTML = "";
+        const searchEngines = searchEngineStore.getEngines();
         
         if (searchEngines.length === 0) {
             emptyState.style.display = "block";
@@ -63,7 +52,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             if (engine.queryRegex) {
                 const regexMeta = document.createElement("div");
                 regexMeta.className = "shortcut-regex";
-                regexMeta.textContent = `Regex: /${engine.queryRegex}/ → ${engine.queryReplacement}`;
+                regexMeta.textContent = `Regex: /${engine.queryRegex}/ → ${engine.queryReplacement || ''}`;
                 info.appendChild(regexMeta);
             }
 
@@ -120,7 +109,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     async function saveForm() {
         const title = engineTitleInput.value.trim();
         const url = engineUrlInput.value.trim();
-        const id = engineIdInput.value;
+        const id = engineIdInput.value || null;
 
         if (!title || !url) {
             alert("Title and URL Template are required!");
@@ -130,29 +119,28 @@ document.addEventListener("DOMContentLoaded", async () => {
         const regex = engineRegexInput.value.trim() || null;
         const replacement = engineReplacementInput.value.trim() || null;
 
-        if (id) {
-            // Edit existing engine
-            const index = searchEngines.findIndex((e) => e.id === id);
-            if (index !== -1) {
-                searchEngines[index] = { id, title, urlTemplate: url, queryRegex: regex, queryReplacement: replacement };
-            }
-        } else {
-            // Add new engine
-            const newId = `engine-${Date.now()}`;
-            searchEngines.push({ id: newId, title, urlTemplate: url, queryRegex: regex, queryReplacement: replacement });
+        try {
+            await searchEngineStore.saveEngine({
+                id,
+                title,
+                urlTemplate: url,
+                queryRegex: regex,
+                queryReplacement: replacement
+            });
+            closeForm();
+            renderList();
+        } catch (err) {
+            alert(`Error saving shortcut: ${err.message}`);
         }
-
-        await chrome.storage.local.set({ searchEngines });
-        closeForm();
-        renderList();
     }
 
     // Delete Shortcut Engine
     async function deleteEngine(id) {
         if (confirm("Are you sure you want to delete this search shortcut?")) {
-            searchEngines = searchEngines.filter((e) => e.id !== id);
-            await chrome.storage.local.set({ searchEngines });
-            renderList();
+            const success = await searchEngineStore.deleteEngine(id);
+            if (success) {
+                renderList();
+            }
         }
     }
 
@@ -161,7 +149,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     cancelBtn.addEventListener("click", closeForm);
     saveBtn.addEventListener("click", saveForm);
 
-    // Initial Load
-    await loadSettings();
-});
+    // Subscribe to store updates (external sync)
+    searchEngineStore.subscribe(() => {
+        renderList();
+    });
 
+    // Initial Load
+    try {
+        await searchEngineStore.load();
+        renderList();
+    } catch (err) {
+        console.error("Failed to load search engine store:", err);
+    }
+});
