@@ -1,6 +1,8 @@
 // store.js - 深度資料模組 (Deep Collection Module)
 // 封裝所有項目 CRUD、標籤串聯異動、項目去重、ID/時間戳生成與儲存持久化
 
+export const UNTAGGED_TAG = '_UNTAGGED_';
+
 let idCounter = 0;
 function generateUniqueId() {
   idCounter = (idCounter + 1) % 100000;
@@ -211,6 +213,86 @@ export class CollectionStore {
       }
     });
     return Array.from(actorSet).sort();
+  }
+
+  /**
+   * 多維度查詢與過濾項目 (支援標籤交集、未分類、演員比對、全文模糊搜尋與排序)
+   */
+  queryItems(options = {}) {
+    const {
+      tags = [],
+      untagged = false,
+      actor = '',
+      search = '',
+      sortBy = 'addDate',
+      sortOrder = 'desc'
+    } = options;
+
+    let results = [...this.items];
+
+    // 1. 標籤與未分類過濾 (Tag & Untagged Scope)
+    const isUntaggedRequested = untagged || (Array.isArray(tags) && tags.includes(UNTAGGED_TAG));
+
+    if (isUntaggedRequested) {
+      results = results.filter(item => !item.tags || item.tags.length === 0);
+    } else if (Array.isArray(tags) && tags.length > 0) {
+      const activeTags = tags.filter(t => t && t !== UNTAGGED_TAG);
+      if (activeTags.length > 0) {
+        results = results.filter(item =>
+          Array.isArray(item.tags) && activeTags.every(t => item.tags.includes(t))
+        );
+      }
+    }
+
+    // 2. 演員過濾 (Actor Substring Match)
+    const cleanActor = (actor || '').trim().toLowerCase();
+    if (cleanActor) {
+      results = results.filter(item => {
+        const actors = Array.isArray(item.actors) ? item.actors : [];
+        return actors.some(a => (a || '').toLowerCase().includes(cleanActor));
+      });
+    }
+
+    // 3. 全文搜尋 (Search across title, url, actors)
+    const cleanSearch = (search || '').trim().toLowerCase();
+    if (cleanSearch) {
+      results = results.filter(item => {
+        const titleMatch = item.title && item.title.toLowerCase().includes(cleanSearch);
+        const urlMatch = item.url && item.url.toLowerCase().includes(cleanSearch);
+        const actors = Array.isArray(item.actors) ? item.actors : [];
+        const actorMatch = actors.some(a => (a || '').toLowerCase().includes(cleanSearch));
+        return titleMatch || urlMatch || actorMatch;
+      });
+    }
+
+    // 4. 排序 (Sorting)
+    results.sort((a, b) => {
+      let valA = a[sortBy];
+      let valB = b[sortBy];
+
+      if (sortBy === 'addDate') {
+        valA = valA || 0;
+        valB = valB || 0;
+      }
+
+      if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+      if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return results;
+  }
+
+  /**
+   * 根據查詢條件隨機取得一個項目 (無匹配項目時回傳 null)
+   */
+  getRandomItem(options = {}) {
+    const matchedItems = this.queryItems(options);
+    if (matchedItems.length === 0) {
+      return null;
+    }
+    const randomIndex = Math.floor(Math.random() * matchedItems.length);
+    return matchedItems[randomIndex];
   }
 
   // --- 項目異動介面 (Item Mutation Interface) ---
