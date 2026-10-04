@@ -1,7 +1,10 @@
-import { collectionStore } from './store.js';
+import { collectionStore, ChromeStorageAdapter } from './store.js';
 import { searchEngineStore } from '../searchEngineStore.js';
 import { tabAdapter } from '../tabAdapter.js';
 import { exportBackupFile, restoreUnifiedBackup } from './backupCoordinator.js';
+import { GoogleDriveAdapter } from './googleDriveAdapter.js';
+import { SyncCoordinator } from './syncCoordinator.js';
+import { initCloudSyncView } from './cloudSyncView.js';
 import { initItemsView, displayItemsByTag, refreshItemsList } from './itemsView.js';
 import { initAddItemView, showAddItemView } from './addItemView.js';
 import { initManageTagsView, showManageTagsView, displayManageTagList } from './manageTagsView.js';
@@ -18,6 +21,28 @@ document.addEventListener('DOMContentLoaded', async () => {
   const exportButton = document.getElementById('exportButton');
   const importButton = document.getElementById('importButton');
   const fileInput = document.getElementById('fileInput');
+
+  // --- Cloud Sync Setup ---
+  const storageAdapter = new ChromeStorageAdapter();
+  const googleDriveAdapter = new GoogleDriveAdapter({
+    storage: storageAdapter
+  });
+  const syncCoordinator = new SyncCoordinator({
+    cloudAdapter: googleDriveAdapter,
+    collectionStore,
+    searchEngineStore,
+    storage: storageAdapter
+  });
+  await syncCoordinator.init();
+
+  initCloudSyncView({
+    googleDriveAdapter,
+    syncCoordinator,
+    onSyncComplete: () => {
+      displayMainLibrary();
+    },
+    onClose: () => {}
+  });
 
   // --- Global Controller State ---
   let currentViewName = 'items'; // 'items', 'add', 'manage'
