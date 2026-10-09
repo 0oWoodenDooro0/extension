@@ -195,6 +195,7 @@ export class SearchEngineStore {
     const cleanUrl = urlTemplate.trim();
     const cleanRegex = queryRegex && queryRegex.trim() ? queryRegex.trim() : null;
     const cleanReplacement = queryReplacement && queryReplacement.trim() ? queryReplacement.trim() : null;
+    const now = Date.now();
 
     let targetEngine = null;
     if (id) {
@@ -206,13 +207,15 @@ export class SearchEngineStore {
       targetEngine.urlTemplate = cleanUrl;
       targetEngine.queryRegex = cleanRegex;
       targetEngine.queryReplacement = cleanReplacement;
+      targetEngine.updatedAt = now;
     } else {
       targetEngine = {
         id: id || generateEngineId(),
         title: cleanTitle,
         urlTemplate: cleanUrl,
         queryRegex: cleanRegex,
-        queryReplacement: cleanReplacement
+        queryReplacement: cleanReplacement,
+        updatedAt: now
       };
       this.engines.push(targetEngine);
     }

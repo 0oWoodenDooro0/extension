@@ -311,7 +311,7 @@ export class CollectionStore {
   // --- 項目異動介面 (Item Mutation Interface) ---
 
   /**
-   * 新增或更新項目 (自動處理 ID 生成、addDate 時間戳、去重與持久化)
+   * 新增或更新項目 (自動處理 ID 生成、addDate/updatedAt 時間戳、去重與持久化)
    */
   async saveItem({ id, title, url, tags = [], imageUrl = null, actors = [] }) {
     if (!title || !url) {
@@ -323,6 +323,7 @@ export class CollectionStore {
     const cleanTags = Array.isArray(tags) ? [...tags] : [];
     const cleanActors = Array.isArray(actors) ? actors.map(a => a.trim()).filter(Boolean) : [];
     const cleanImageUrl = imageUrl ? imageUrl.trim() : null;
+    const now = Date.now();
 
     let targetItem = null;
     if (id) {
@@ -339,6 +340,7 @@ export class CollectionStore {
       targetItem.tags = cleanTags;
       targetItem.imageUrl = cleanImageUrl;
       targetItem.actors = cleanActors;
+      targetItem.updatedAt = now;
     } else {
       // 建立全新項目
       targetItem = {
@@ -346,7 +348,8 @@ export class CollectionStore {
         title: cleanTitle,
         url: cleanUrl,
         tags: cleanTags,
-        addDate: Date.now(),
+        addDate: now,
+        updatedAt: now,
         imageUrl: cleanImageUrl,
         actors: cleanActors
       };
@@ -404,9 +407,11 @@ export class CollectionStore {
     this.tags[tagIndex] = cleanNew;
 
     // 2. 串聯更新所有項目
+    const now = Date.now();
     this.items.forEach(item => {
       if (Array.isArray(item.tags) && item.tags.includes(cleanOld)) {
         item.tags = item.tags.map(t => (t === cleanOld ? cleanNew : t));
+        item.updatedAt = now;
       }
     });
 
@@ -426,9 +431,11 @@ export class CollectionStore {
     this.tags = this.tags.filter(t => t !== cleanName);
 
     // 2. 串聯從所有項目中移除
+    const now = Date.now();
     this.items.forEach(item => {
       if (Array.isArray(item.tags)) {
         item.tags = item.tags.filter(t => t !== cleanName);
+        item.updatedAt = now;
       }
     });
 

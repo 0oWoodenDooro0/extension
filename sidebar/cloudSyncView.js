@@ -116,7 +116,7 @@ export function initCloudSyncView({
     });
   }
 
-  // 立即雙向同步
+  // 立即雙向/三向智慧同步
   if (syncNowBtn) {
     syncNowBtn.addEventListener('click', async () => {
       try {
@@ -130,7 +130,7 @@ export function initCloudSyncView({
         }
       } finally {
         syncNowBtn.disabled = false;
-        syncNowBtn.textContent = 'Sync Now (2-Way Merge)';
+        syncNowBtn.textContent = 'Sync Now (Smart Merge)';
       }
     });
   }
