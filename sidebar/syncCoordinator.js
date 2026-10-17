@@ -18,7 +18,7 @@ function arraysEqual(arr1, arr2) {
   return s1.every((val, idx) => val === s2[idx]);
 }
 
-function isItemContentEqual(a, b) {
+export function isItemContentEqual(a, b) {
   if (!a || !b) return a === b;
   if (a.title !== b.title) return false;
   if (a.url !== b.url) return false;
@@ -28,7 +28,7 @@ function isItemContentEqual(a, b) {
   return true;
 }
 
-function isEngineContentEqual(a, b) {
+export function isEngineContentEqual(a, b) {
   if (!a || !b) return a === b;
   if (a.title !== b.title) return false;
   if (a.urlTemplate !== b.urlTemplate) return false;
@@ -37,22 +37,159 @@ function isEngineContentEqual(a, b) {
   return true;
 }
 
-function isItemModified(item, baseItem) {
-  if (!item && !baseItem) return false;
-  if (!item || !baseItem) return true;
-  const itemTime = Number(item.updatedAt || item.addDate || 0);
-  const baseTime = Number(baseItem.updatedAt || baseItem.addDate || 0);
-  if (itemTime > baseTime) return true;
-  return !isItemContentEqual(item, baseItem);
+export function isEntityModified(entity, baseEntity, getTimestamp, isContentEqual) {
+  if (!entity && !baseEntity) return false;
+  if (!entity || !baseEntity) return true;
+  const entityTime = getTimestamp(entity);
+  const baseTime = getTimestamp(baseEntity);
+  if (entityTime > baseTime) return true;
+  return !isContentEqual(entity, baseEntity);
 }
 
-function isEngineModified(eng, baseEng) {
-  if (!eng && !baseEng) return false;
-  if (!eng || !baseEng) return true;
-  const engTime = Number(eng.updatedAt || 0);
-  const baseTime = Number(baseEng.updatedAt || 0);
-  if (engTime > baseTime) return true;
-  return !isEngineContentEqual(eng, baseEng);
+export function isItemModified(item, baseItem) {
+  return isEntityModified(
+    item,
+    baseItem,
+    (i) => Number(i.updatedAt || i.addDate || 0),
+    isItemContentEqual
+  );
+}
+
+export function isEngineModified(eng, baseEng) {
+  return isEntityModified(
+    eng,
+    baseEng,
+    (e) => Number(e.updatedAt || 0),
+    isEngineContentEqual
+  );
+}
+
+/**
+ * 通用 2-Way 實體列表合併輔助函數
+ */
+export function mergeEntityList2Way({
+  localList = [],
+  cloudList = [],
+  getKey = (item) => item.id || item.url,
+  getTimestamp = (item) => Number(item.updatedAt || item.addDate || 0)
+} = {}) {
+  const entityMap = new Map();
+  for (const cloudEntity of (cloudList || [])) {
+    if (!cloudEntity) continue;
+    const key = getKey(cloudEntity);
+    if (key) entityMap.set(key, { ...cloudEntity });
+  }
+
+  for (const localEntity of (localList || [])) {
+    if (!localEntity) continue;
+    const key = getKey(localEntity);
+    if (!key) continue;
+    if (!entityMap.has(key)) {
+      entityMap.set(key, { ...localEntity });
+    } else {
+      const cloudEntity = entityMap.get(key);
+      const localTime = getTimestamp(localEntity);
+      const cloudTime = getTimestamp(cloudEntity);
+      if (localTime >= cloudTime) {
+        entityMap.set(key, { ...cloudEntity, ...localEntity });
+      }
+    }
+  }
+
+  return Array.from(entityMap.values());
+}
+
+/**
+ * 通用 3-Way 實體列表合併輔助函數
+ */
+export function mergeEntityList3Way({
+  localList = [],
+  cloudList = [],
+  baseList = [],
+  getKey = (item) => item.id || item.url,
+  getTimestamp = (item) => Number(item.updatedAt || item.addDate || 0),
+  isContentEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+} = {}) {
+  const localMap = new Map();
+  for (const item of (localList || [])) {
+    if (!item) continue;
+    const key = getKey(item);
+    if (key) localMap.set(key, item);
+  }
+
+  const cloudMap = new Map();
+  for (const item of (cloudList || [])) {
+    if (!item) continue;
+    const key = getKey(item);
+    if (key) cloudMap.set(key, item);
+  }
+
+  const baseMap = new Map();
+  for (const item of (baseList || [])) {
+    if (!item) continue;
+    const key = getKey(item);
+    if (key) baseMap.set(key, item);
+  }
+
+  const allKeys = new Set([...localMap.keys(), ...cloudMap.keys(), ...baseMap.keys()]);
+  const merged = [];
+
+  for (const key of allKeys) {
+    const localEntity = localMap.get(key);
+    const cloudEntity = cloudMap.get(key);
+    const baseEntity = baseMap.get(key);
+
+    const inLocal = Boolean(localEntity);
+    const inCloud = Boolean(cloudEntity);
+    const inBase = Boolean(baseEntity);
+
+    if (inLocal && inCloud && inBase) {
+      const localMod = isEntityModified(localEntity, baseEntity, getTimestamp, isContentEqual);
+      const cloudMod = isEntityModified(cloudEntity, baseEntity, getTimestamp, isContentEqual);
+
+      if (!localMod && !cloudMod) {
+        merged.push({ ...localEntity });
+      } else if (localMod && !cloudMod) {
+        merged.push({ ...localEntity });
+      } else if (!localMod && cloudMod) {
+        merged.push({ ...cloudEntity });
+      } else {
+        const localTime = getTimestamp(localEntity);
+        const cloudTime = getTimestamp(cloudEntity);
+        if (localTime >= cloudTime) {
+          merged.push({ ...cloudEntity, ...localEntity });
+        } else {
+          merged.push({ ...localEntity, ...cloudEntity });
+        }
+      }
+    } else if (!inLocal && inCloud && inBase) {
+      const cloudMod = isEntityModified(cloudEntity, baseEntity, getTimestamp, isContentEqual);
+      if (cloudMod) {
+        merged.push({ ...cloudEntity });
+      }
+    } else if (inLocal && !inCloud && inBase) {
+      const localMod = isEntityModified(localEntity, baseEntity, getTimestamp, isContentEqual);
+      if (localMod) {
+        merged.push({ ...localEntity });
+      }
+    } else if (!inLocal && !inCloud && inBase) {
+      // Both deleted
+    } else if (inLocal && !inCloud && !inBase) {
+      merged.push({ ...localEntity });
+    } else if (!inLocal && inCloud && !inBase) {
+      merged.push({ ...cloudEntity });
+    } else if (inLocal && inCloud && !inBase) {
+      const localTime = getTimestamp(localEntity);
+      const cloudTime = getTimestamp(cloudEntity);
+      if (localTime >= cloudTime) {
+        merged.push({ ...cloudEntity, ...localEntity });
+      } else {
+        merged.push({ ...localEntity, ...cloudEntity });
+      }
+    }
+  }
+
+  return merged;
 }
 
 /**
@@ -105,35 +242,16 @@ export function isUnifiedDataEqual(dataA, dataB) {
 }
 
 /**
- * 舊版雙向合併 (Smart 2-Way Merge)
+ * 雙向合併 (Smart 2-Way Merge)
  * 用於無基準快照 (首次同步或升級過渡) 時進行聯集保護，防止資料誤刪
  */
 export function twoWayMergeUnifiedData(localData, cloudData) {
-  const localItems = Array.isArray(localData?.items) ? localData.items : [];
-  const cloudItems = Array.isArray(cloudData?.items) ? cloudData.items : [];
-
-  const itemMap = new Map();
-  for (const item of cloudItems) {
-    if (item && (item.id || item.url)) {
-      const key = item.id || item.url;
-      itemMap.set(key, { ...item });
-    }
-  }
-
-  for (const localItem of localItems) {
-    if (!localItem || (!localItem.id && !localItem.url)) continue;
-    const key = localItem.id || localItem.url;
-    if (!itemMap.has(key)) {
-      itemMap.set(key, { ...localItem });
-    } else {
-      const cloudItem = itemMap.get(key);
-      const localTime = Number(localItem.updatedAt || localItem.addDate || 0);
-      const cloudTime = Number(cloudItem.updatedAt || cloudItem.addDate || 0);
-      if (localTime >= cloudTime) {
-        itemMap.set(key, { ...cloudItem, ...localItem });
-      }
-    }
-  }
+  const items = mergeEntityList2Way({
+    localList: localData?.items || [],
+    cloudList: cloudData?.items || [],
+    getKey: (item) => item.id || item.url,
+    getTimestamp: (item) => Number(item.updatedAt || item.addDate || 0)
+  });
 
   const localTags = Array.isArray(localData?.tags) ? localData.tags : [];
   const cloudTags = Array.isArray(cloudData?.tags) ? cloudData.tags : [];
@@ -144,312 +262,145 @@ export function twoWayMergeUnifiedData(localData, cloudData) {
     }
   }
 
-  const localEngines = Array.isArray(localData?.searchEngines) ? localData.searchEngines : [];
-  const cloudEngines = Array.isArray(cloudData?.searchEngines) ? cloudData.searchEngines : [];
-  const engineMap = new Map();
-
-  for (const eng of cloudEngines) {
-    if (eng && (eng.id || eng.urlTemplate)) {
-      const key = eng.id || eng.urlTemplate;
-      engineMap.set(key, { ...eng });
-    }
-  }
-
-  for (const eng of localEngines) {
-    if (!eng || (!eng.id && !eng.urlTemplate)) continue;
-    const key = eng.id || eng.urlTemplate;
-    if (!engineMap.has(key)) {
-      engineMap.set(key, { ...eng });
-    } else {
-      const cloudEng = engineMap.get(key);
-      const localTime = Number(eng.updatedAt || 0);
-      const cloudTime = Number(cloudEng.updatedAt || 0);
-      if (localTime >= cloudTime) {
-        engineMap.set(key, { ...cloudEng, ...eng });
-      }
-    }
-  }
+  const searchEngines = mergeEntityList2Way({
+    localList: localData?.searchEngines || [],
+    cloudList: cloudData?.searchEngines || [],
+    getKey: (eng) => eng.id || eng.urlTemplate,
+    getTimestamp: (eng) => Number(eng.updatedAt || 0)
+  });
 
   return {
     version: 1,
-    items: Array.from(itemMap.values()),
+    items,
     tags: Array.from(tagSet),
-    searchEngines: Array.from(engineMap.values())
+    searchEngines
   };
 }
 
 /**
- * 三向合併演算法 (Smart 3-Way Merge)
- * 根據本機 (Local)、雲端 (Cloud) 與上次同步基準 (Base) 快照進行精準比對：
- * 1. 本機刪除 (在 Base 但不在 Local，且 Cloud 未被異動) -> 雲端同步刪除，不重新復活。
- * 2. 雲端刪除 (在 Base 但不在 Cloud，且 Local 未被異動) -> 本機同步刪除。
- * 3. 雙方新增或各自修改 -> 保留或依照 updatedAt 解決衝突 (修改勝過刪除)。
- * @param {Object} localData - 本機目前資料
- * @param {Object} cloudData - 雲端下載資料
- * @param {Object} baseData - 上次同步基準快照
- * @returns {Object} 合併後物件 { items, tags, searchEngines }
+ * 三向智慧合併 (Smart 3-Way Merge with Deletion & Timestamp Conflict Resolution)
  */
 export function threeWayMergeUnifiedData(localData, cloudData, baseData) {
   if (!baseData) {
     return twoWayMergeUnifiedData(localData, cloudData);
   }
 
-  const localItems = Array.isArray(localData?.items) ? localData.items : [];
-  const cloudItems = Array.isArray(cloudData?.items) ? cloudData.items : [];
-  const baseItems = Array.isArray(baseData?.items) ? baseData.items : [];
+  const items = mergeEntityList3Way({
+    localList: localData?.items || [],
+    cloudList: cloudData?.items || [],
+    baseList: baseData?.items || [],
+    getKey: (item) => item.id || item.url,
+    getTimestamp: (item) => Number(item.updatedAt || item.addDate || 0),
+    isContentEqual: isItemContentEqual
+  });
 
-  // --- 1. Items 3-Way Merge ---
-  const localItemMap = new Map();
-  for (const item of localItems) {
-    if (item && (item.id || item.url)) {
-      localItemMap.set(item.id || item.url, item);
-    }
-  }
-
-  const cloudItemMap = new Map();
-  for (const item of cloudItems) {
-    if (item && (item.id || item.url)) {
-      cloudItemMap.set(item.id || item.url, item);
-    }
-  }
-
-  const baseItemMap = new Map();
-  for (const item of baseItems) {
-    if (item && (item.id || item.url)) {
-      baseItemMap.set(item.id || item.url, item);
-    }
-  }
-
-  const allItemKeys = new Set([
-    ...localItemMap.keys(),
-    ...cloudItemMap.keys(),
-    ...baseItemMap.keys()
-  ]);
-
-  const mergedItems = [];
-
-  for (const key of allItemKeys) {
-    const localItem = localItemMap.get(key);
-    const cloudItem = cloudItemMap.get(key);
-    const baseItem = baseItemMap.get(key);
-
-    const inLocal = !!localItem;
-    const inCloud = !!cloudItem;
-    const inBase = !!baseItem;
-
-    if (inLocal && inCloud && inBase) {
-      const localMod = isItemModified(localItem, baseItem);
-      const cloudMod = isItemModified(cloudItem, baseItem);
-
-      if (!localMod && !cloudMod) {
-        mergedItems.push({ ...localItem });
-      } else if (localMod && !cloudMod) {
-        mergedItems.push({ ...localItem });
-      } else if (!localMod && cloudMod) {
-        mergedItems.push({ ...cloudItem });
-      } else {
-        const localTime = Number(localItem.updatedAt || localItem.addDate || 0);
-        const cloudTime = Number(cloudItem.updatedAt || cloudItem.addDate || 0);
-        if (localTime >= cloudTime) {
-          mergedItems.push({ ...cloudItem, ...localItem });
-        } else {
-          mergedItems.push({ ...localItem, ...cloudItem });
-        }
-      }
-    } else if (!inLocal && inCloud && inBase) {
-      // 在 Base 與 Cloud，但 Local 不存在
-      const cloudMod = isItemModified(cloudItem, baseItem);
-      if (cloudMod) {
-        // 雲端在上次同步後有進一步更新 -> 衝突時以編輯為優先
-        mergedItems.push({ ...cloudItem });
-      } else {
-        // 雲端未更動，本機刪除 -> 確認刪除！
-      }
-    } else if (inLocal && !inCloud && inBase) {
-      // 在 Base 與 Local，但 Cloud 不存在 (其他裝置刪除)
-      const localMod = isItemModified(localItem, baseItem);
-      if (localMod) {
-        // 本機在上次同步後有進一步更新 -> 衝突時以本機編輯為優先
-        mergedItems.push({ ...localItem });
-      } else {
-        // 本機未更動，雲端已刪除 -> 確認刪除！
-      }
-    } else if (!inLocal && !inCloud && inBase) {
-      // 雙方皆已刪除
-    } else if (inLocal && !inCloud && !inBase) {
-      // 本機新增項目
-      mergedItems.push({ ...localItem });
-    } else if (!inLocal && inCloud && !inBase) {
-      // 雲端新增項目
-      mergedItems.push({ ...cloudItem });
-    } else if (inLocal && inCloud && !inBase) {
-      // 雙方各自新增同一 ID/URL 項目 -> 比較時間戳
-      const localTime = Number(localItem.updatedAt || localItem.addDate || 0);
-      const cloudTime = Number(cloudItem.updatedAt || cloudItem.addDate || 0);
-      if (localTime >= cloudTime) {
-        mergedItems.push({ ...cloudItem, ...localItem });
-      } else {
-        mergedItems.push({ ...localItem, ...cloudItem });
-      }
-    }
-  }
-
-  // --- 2. Tags 3-Way Merge ---
-  const localTags = Array.isArray(localData?.tags) ? localData.tags : [];
-  const cloudTags = Array.isArray(cloudData?.tags) ? cloudData.tags : [];
-  const baseTags = Array.isArray(baseData?.tags) ? baseData.tags : [];
-
-  const localTagSet = new Set(localTags);
-  const cloudTagSet = new Set(cloudTags);
-  const baseTagSet = new Set(baseTags);
-
-  const allTagKeys = new Set([...localTagSet, ...cloudTagSet, ...baseTagSet]);
-  const finalTagSet = new Set();
+  // Tags 3-way merge
+  const localTags = new Set(Array.isArray(localData?.tags) ? localData.tags : []);
+  const cloudTags = new Set(Array.isArray(cloudData?.tags) ? cloudData.tags : []);
+  const baseTags = new Set(Array.isArray(baseData?.tags) ? baseData.tags : []);
+  const allTagKeys = new Set([...localTags, ...cloudTags, ...baseTags]);
+  const mergedTags = [];
 
   for (const tag of allTagKeys) {
-    if (!tag || typeof tag !== 'string') continue;
-    const inLocal = localTagSet.has(tag);
-    const inCloud = cloudTagSet.has(tag);
-    const inBase = baseTagSet.has(tag);
+    const inLocal = localTags.has(tag);
+    const inCloud = cloudTags.has(tag);
+    const inBase = baseTags.has(tag);
 
-    if (inLocal && inCloud && inBase) {
-      finalTagSet.add(tag);
-    } else if (!inLocal && inCloud && inBase) {
-      // 本機刪除標籤 -> 不保留
-    } else if (inLocal && !inCloud && inBase) {
-      // 雲端刪除標籤 -> 不保留
-    } else if (inLocal && !inBase) {
-      // 本機新增標籤 -> 保留
-      finalTagSet.add(tag);
-    } else if (inCloud && !inBase) {
-      // 雲端新增標籤 -> 保留
-      finalTagSet.add(tag);
-    }
-  }
-
-  // 保持本機順序，並將雲端新增的標籤追加至末尾
-  const mergedTags = [];
-  for (const tag of localTags) {
-    if (finalTagSet.has(tag) && !mergedTags.includes(tag)) {
+    if (inLocal && inCloud) {
       mergedTags.push(tag);
-    }
-  }
-  for (const tag of cloudTags) {
-    if (finalTagSet.has(tag) && !mergedTags.includes(tag)) {
-      mergedTags.push(tag);
-    }
-  }
-
-  // --- 3. Search Engines 3-Way Merge ---
-  const localEngines = Array.isArray(localData?.searchEngines) ? localData.searchEngines : [];
-  const cloudEngines = Array.isArray(cloudData?.searchEngines) ? cloudData.searchEngines : [];
-  const baseEngines = Array.isArray(baseData?.searchEngines) ? baseData.searchEngines : [];
-
-  const localEngMap = new Map();
-  for (const eng of localEngines) {
-    if (eng && (eng.id || eng.urlTemplate)) {
-      localEngMap.set(eng.id || eng.urlTemplate, eng);
+    } else if (inLocal && !inCloud) {
+      if (!inBase) mergedTags.push(tag);
+    } else if (!inLocal && inCloud) {
+      if (!inBase) mergedTags.push(tag);
     }
   }
 
-  const cloudEngMap = new Map();
-  for (const eng of cloudEngines) {
-    if (eng && (eng.id || eng.urlTemplate)) {
-      cloudEngMap.set(eng.id || eng.urlTemplate, eng);
-    }
-  }
-
-  const baseEngMap = new Map();
-  for (const eng of baseEngines) {
-    if (eng && (eng.id || eng.urlTemplate)) {
-      baseEngMap.set(eng.id || eng.urlTemplate, eng);
-    }
-  }
-
-  const allEngKeys = new Set([
-    ...localEngMap.keys(),
-    ...cloudEngMap.keys(),
-    ...baseEngMap.keys()
-  ]);
-
-  const mergedEngines = [];
-
-  for (const key of allEngKeys) {
-    const localEng = localEngMap.get(key);
-    const cloudEng = cloudEngMap.get(key);
-    const baseEng = baseEngMap.get(key);
-
-    const inLocal = !!localEng;
-    const inCloud = !!cloudEng;
-    const inBase = !!baseEng;
-
-    if (inLocal && inCloud && inBase) {
-      const localMod = isEngineModified(localEng, baseEng);
-      const cloudMod = isEngineModified(cloudEng, baseEng);
-
-      if (!localMod && !cloudMod) {
-        mergedEngines.push({ ...localEng });
-      } else if (localMod && !cloudMod) {
-        mergedEngines.push({ ...localEng });
-      } else if (!localMod && cloudMod) {
-        mergedEngines.push({ ...cloudEng });
-      } else {
-        const localTime = Number(localEng.updatedAt || 0);
-        const cloudTime = Number(cloudEng.updatedAt || 0);
-        if (localTime >= cloudTime) {
-          mergedEngines.push({ ...cloudEng, ...localEng });
-        } else {
-          mergedEngines.push({ ...localEng, ...cloudEng });
-        }
-      }
-    } else if (!inLocal && inCloud && inBase) {
-      const cloudMod = isEngineModified(cloudEng, baseEng);
-      if (cloudMod) {
-        mergedEngines.push({ ...cloudEng });
-      }
-    } else if (inLocal && !inCloud && inBase) {
-      const localMod = isEngineModified(localEng, baseEng);
-      if (localMod) {
-        mergedEngines.push({ ...localEng });
-      }
-    } else if (!inLocal && !inCloud && inBase) {
-      // 雙方皆已刪除
-    } else if (inLocal && !inCloud && !inBase) {
-      mergedEngines.push({ ...localEng });
-    } else if (!inLocal && inCloud && !inBase) {
-      mergedEngines.push({ ...cloudEng });
-    } else if (inLocal && inCloud && !inBase) {
-      const localTime = Number(localEng.updatedAt || 0);
-      const cloudTime = Number(cloudEng.updatedAt || 0);
-      if (localTime >= cloudTime) {
-        mergedEngines.push({ ...cloudEng, ...localEng });
-      } else {
-        mergedEngines.push({ ...localEng, ...cloudEng });
-      }
-    }
-  }
+  const searchEngines = mergeEntityList3Way({
+    localList: localData?.searchEngines || [],
+    cloudList: cloudData?.searchEngines || [],
+    baseList: baseData?.searchEngines || [],
+    getKey: (eng) => eng.id || eng.urlTemplate,
+    getTimestamp: (eng) => Number(eng.updatedAt || 0),
+    isContentEqual: isEngineContentEqual
+  });
 
   return {
     version: 1,
-    items: mergedItems,
+    items,
     tags: mergedTags,
-    searchEngines: mergedEngines
+    searchEngines
   };
 }
 
 /**
  * 智慧合併統一入口
  * 若有提供 baseData 則採用 Smart 3-Way Merge，否則退回 2-Way Merge
- * @param {Object} localData - 本機備份物件 { items, tags, searchEngines }
- * @param {Object} cloudData - 雲端備份物件 { items, tags, searchEngines }
- * @param {Object} [baseData=null] - 上次同步基準快照
- * @returns {Object} 合併後物件 { items, tags, searchEngines }
  */
 export function mergeUnifiedData(localData, cloudData, baseData = null) {
   if (baseData && typeof baseData === 'object') {
     return threeWayMergeUnifiedData(localData, cloudData, baseData);
   }
   return twoWayMergeUnifiedData(localData, cloudData);
+}
+
+/**
+ * 收斂跨環境生命週期 (Sidebar / Popup) 與 IPC 綁定
+ */
+export function bindClientLifecycle({
+  portName = 'sidebar-lifecycle',
+  coordinator = null,
+  runtime = (typeof chrome !== 'undefined' ? chrome.runtime : null),
+  windowObj = (typeof window !== 'undefined' ? window : null),
+  documentObj = (typeof document !== 'undefined' ? document : null)
+} = {}) {
+  if (runtime && typeof runtime.connect === 'function') {
+    try {
+      runtime.connect({ name: portName });
+    } catch {
+      // ignore
+    }
+  }
+
+  const handleFlush = () => {
+    let sentToRuntime = false;
+    if (runtime && typeof runtime.sendMessage === 'function') {
+      try {
+        runtime.sendMessage({ action: 'flushSync' }, () => {
+          if (runtime.lastError && coordinator && typeof coordinator.flushPendingSync === 'function') {
+            coordinator.flushPendingSync().catch(() => {});
+          }
+        });
+        sentToRuntime = true;
+      } catch {
+        // fallback
+      }
+    }
+    if (!sentToRuntime && coordinator && typeof coordinator.flushPendingSync === 'function') {
+      coordinator.flushPendingSync().catch(() => {});
+    }
+  };
+
+  const onVisibilityChange = () => {
+    if (documentObj && documentObj.visibilityState === 'hidden') {
+      handleFlush();
+    }
+  };
+
+  if (windowObj && typeof windowObj.addEventListener === 'function') {
+    windowObj.addEventListener('pagehide', handleFlush);
+  }
+  if (documentObj && typeof documentObj.addEventListener === 'function') {
+    documentObj.addEventListener('visibilitychange', onVisibilityChange);
+  }
+
+  return function unbind() {
+    if (windowObj && typeof windowObj.removeEventListener === 'function') {
+      windowObj.removeEventListener('pagehide', handleFlush);
+    }
+    if (documentObj && typeof documentObj.removeEventListener === 'function') {
+      documentObj.removeEventListener('visibilitychange', onVisibilityChange);
+    }
+  };
 }
 
 /**
@@ -478,6 +429,7 @@ export class SyncCoordinator {
     this.autoSyncDebounceMs = autoSyncDebounceMs;
     this.status = SYNC_STATUS.IDLE;
     this.lastSyncTime = null;
+    this.lastError = null;
     this.baseData = null;
     this.isDirty = false;
     this.isApplyingRemoteSync = false;
@@ -486,6 +438,7 @@ export class SyncCoordinator {
     this._pendingSyncOptions = null;
     this._autoSyncTimer = null;
     this._unsubscribeStores = [];
+    this._dataChangeSubscribed = false;
     this.listeners = [];
 
     if (this.storage && typeof this.storage.onChanged === 'function') {
@@ -520,6 +473,11 @@ export class SyncCoordinator {
 
   _setStatus(status, detail = null) {
     this.status = status;
+    if (status === SYNC_STATUS.ERROR) {
+      this.lastError = detail;
+    } else if (status === SYNC_STATUS.SUCCESS) {
+      this.lastError = null;
+    }
     this.listeners.forEach(cb => cb({ status, detail, lastSyncTime: this.lastSyncTime }));
     if (this.storage) {
       this.storage.set({
@@ -533,7 +491,12 @@ export class SyncCoordinator {
     }
   }
 
-  async init() {
+  /**
+   * 初始化 SyncCoordinator。
+   * mode 為 'background' 時自動監聽 Storage 資料變更並標記 dirty，不啟動 Debounce 排程；
+   * mode 為 'client' 時可依 autoSyncOnChange 決定是否自動排程。
+   */
+  async init({ mode = 'client', autoSyncOnChange = false } = {}) {
     if (this.storage) {
       const data = await this.storage.get(['last_sync_time', 'last_sync_base', 'sync_dirty']);
       if (data.last_sync_time) {
@@ -545,7 +508,112 @@ export class SyncCoordinator {
       if (data.sync_dirty !== undefined) {
         this.isDirty = !!data.sync_dirty;
       }
+
+      if (typeof this.storage.onChanged === 'function' && !this._dataChangeSubscribed) {
+        this._dataChangeSubscribed = true;
+        this.storage.onChanged(async (changes) => {
+          if (this.isApplyingRemoteSync) return;
+          if (changes.sync_in_progress && changes.sync_in_progress.newValue === true) return;
+
+          const hasDataChange = Boolean(changes.items || changes.tags || changes.searchEngines);
+          if (!hasDataChange) return;
+
+          if (mode === 'background' || !autoSyncOnChange) {
+            await this.markDirty();
+          } else {
+            this.scheduleAutoSync();
+          }
+        });
+      }
     }
+  }
+
+  /**
+   * 取得整合帳號狀態摘要
+   */
+  async getAccountSummary() {
+    let clientId = '';
+    let redirectUri = '';
+    let canAuto = false;
+    let isAuth = false;
+    let user = null;
+
+    if (this.cloudAdapter) {
+      if (typeof this.cloudAdapter.loadConfig === 'function') {
+        const config = await this.cloudAdapter.loadConfig();
+        clientId = config.clientId || '';
+        user = config.user || null;
+      } else if (typeof this.cloudAdapter.getClientId === 'function') {
+        clientId = this.cloudAdapter.getClientId() || '';
+      }
+      if (typeof this.cloudAdapter.getRedirectUri === 'function') {
+        redirectUri = this.cloudAdapter.getRedirectUri() || '';
+      }
+      if (typeof this.cloudAdapter.canAutoConnect === 'function') {
+        canAuto = await this.cloudAdapter.canAutoConnect();
+      }
+      if (typeof this.cloudAdapter.isAuthenticated === 'function') {
+        isAuth = await this.cloudAdapter.isAuthenticated();
+      }
+      if (!isAuth && canAuto && typeof this.cloudAdapter.ensureAuthenticated === 'function') {
+        isAuth = await this.cloudAdapter.ensureAuthenticated({ allowInteractiveFallback: false });
+      }
+      if (isAuth && typeof this.cloudAdapter.getUserInfo === 'function') {
+        try {
+          user = await this.cloudAdapter.getUserInfo();
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    return {
+      status: this.status,
+      lastSyncTime: this.lastSyncTime,
+      error: this.status === SYNC_STATUS.ERROR ? this.lastError : null,
+      isAuthenticated: isAuth,
+      user,
+      clientId,
+      redirectUri,
+      canAutoConnect: canAuto
+    };
+  }
+
+  async getSyncState() {
+    return this.getAccountSummary();
+  }
+
+  async saveClientConfig(clientId) {
+    const trimmed = (clientId || '').trim();
+    if (this.cloudAdapter && typeof this.cloudAdapter.saveConfig === 'function') {
+      await this.cloudAdapter.saveConfig(trimmed);
+    } else if (this.cloudAdapter && typeof this.cloudAdapter.setClientId === 'function') {
+      this.cloudAdapter.setClientId(trimmed);
+    }
+    if (this.storage) {
+      await this.storage.set({ gdrive_client_id: trimmed });
+    }
+  }
+
+  async connectAccount() {
+    if (!this.cloudAdapter || typeof this.cloudAdapter.authorize !== 'function') {
+      throw new Error('Cloud adapter does not support authorization');
+    }
+    const authResult = await this.cloudAdapter.authorize(true);
+    const syncResult = await this.sync();
+    return { authResult, syncResult };
+  }
+
+  async disconnectAccount() {
+    if (this.cloudAdapter && typeof this.cloudAdapter.disconnect === 'function') {
+      await this.cloudAdapter.disconnect();
+    }
+    this._setStatus(SYNC_STATUS.IDLE);
+    await this.resetBase();
+  }
+
+  bindLifecycle(options = {}) {
+    return bindClientLifecycle({ coordinator: this, ...options });
   }
 
   /**
@@ -717,9 +785,6 @@ export class SyncCoordinator {
 
   /**
    * 執行同步：讀取雲端、比對合併 (Smart 3-Way Merge)、更新本地、推回雲端
-   * 具備 Single-Flight 防重入鎖定，若同步期間有新請求將自動排隊接續執行
-   * @param {Object} [options]
-   * @returns {Promise<{ success: boolean, stats?: Object, error?: string }>}
    */
   async sync(options = {}) {
     if (this._autoSyncTimer) {
@@ -758,39 +823,31 @@ export class SyncCoordinator {
     let isAuth = false;
     if (typeof this.cloudAdapter.ensureAuthenticated === 'function') {
       isAuth = await this.cloudAdapter.ensureAuthenticated({ allowInteractiveFallback });
-    } else {
+    } else if (typeof this.cloudAdapter.isAuthenticated === 'function') {
       isAuth = await this.cloudAdapter.isAuthenticated();
     }
 
     if (!isAuth) {
-      const errorMsg = 'Cloud adapter is not authenticated.';
+      const errorMsg = 'Google Drive is not authenticated. Please log in.';
       this._setStatus(SYNC_STATUS.ERROR, errorMsg);
       return { success: false, error: errorMsg };
     }
 
-    this._setStatus(SYNC_STATUS.SYNCING, 'Checking cloud files...');
+    this._setStatus(SYNC_STATUS.SYNCING, 'Checking cloud backup...');
 
     try {
-      if (this.storage) {
-        const storedState = await this.storage.get(['last_sync_base']);
-        if (storedState && storedState.last_sync_base) {
-          this.baseData = storedState.last_sync_base;
-        }
-      }
-
-      // 1. 檢查雲端是否有舊有備份檔案
       const cloudFile = await this.cloudAdapter.findFile();
 
+      const localData = await createUnifiedBackup(this.collectionStore, this.searchEngineStore);
+
       if (!cloudFile) {
-        // 雲端無檔案：取得本地最新資料並推送至雲端
-        const localData = await createUnifiedBackup(this.collectionStore, this.searchEngineStore);
-        this._setStatus(SYNC_STATUS.SYNCING, 'Uploading initial data to cloud...');
+        this._setStatus(SYNC_STATUS.SYNCING, 'Uploading initial backup to cloud...');
         const uploadResult = await this.cloudAdapter.uploadJson(localData);
 
         const now = Date.now();
         await this._saveSyncState(now, localData);
+        this._setStatus(SYNC_STATUS.SUCCESS, 'Initial upload completed');
 
-        this._setStatus(SYNC_STATUS.SUCCESS, 'Initial upload complete');
         return {
           success: true,
           action: 'uploaded_initial',
@@ -803,49 +860,50 @@ export class SyncCoordinator {
         };
       }
 
-      // 2. 雲端有檔案：下載內容
       this._setStatus(SYNC_STATUS.SYNCING, 'Downloading cloud data...');
       const cloudData = await this.cloudAdapter.downloadJson(cloudFile.id);
+      validateBackupPayload(cloudData);
 
-      const validation = validateBackupPayload(cloudData);
-      if (!validation.valid) {
-        throw new Error(`Cloud data corrupted or invalid format: ${validation.error}`);
-      }
-
-      // 3. 在網路請求完成後，立即讀取當前「最新、最即時」的本地快照（避免網路請求期間使用者新增的資料被覆寫）
-      const localData = await createUnifiedBackup(this.collectionStore, this.searchEngineStore);
-
-      // 4. 智慧三向合併 (Smart 3-Way Merge)
       const mergedData = mergeUnifiedData(localData, cloudData, this.baseData);
 
-      // 5. 更新本地 Store (標記 isApplyingRemoteSync 與 sync_in_progress 防止觸發循環自動同步)
-      this.isApplyingRemoteSync = true;
-      if (this.storage) {
-        await this.storage.set({ sync_in_progress: true });
-      }
-      try {
-        await restoreUnifiedBackup(mergedData, {
-          collectionStore: this.collectionStore,
-          searchEngineStore: this.searchEngineStore
-        });
-      } finally {
-        this.isApplyingRemoteSync = false;
+      const localNeedsUpdate = !isUnifiedDataEqual(localData, mergedData);
+      const cloudNeedsUpdate = !isUnifiedDataEqual(cloudData, mergedData);
+
+      if (localNeedsUpdate) {
+        this._setStatus(SYNC_STATUS.SYNCING, 'Applying remote changes locally...');
+        this.isApplyingRemoteSync = true;
         if (this.storage) {
-          await this.storage.set({ sync_in_progress: false });
+          await this.storage.set({ sync_in_progress: true });
+        }
+        try {
+          const restoreRes = await restoreUnifiedBackup(mergedData, {
+            collectionStore: this.collectionStore,
+            searchEngineStore: this.searchEngineStore
+          });
+          if (!restoreRes.success) {
+            throw new Error(`Failed to restore merged data locally: ${restoreRes.error}`);
+          }
+        } finally {
+          this.isApplyingRemoteSync = false;
+          if (this.storage) {
+            await this.storage.set({ sync_in_progress: false });
+          }
         }
       }
 
-      // 6. 將合併後的最終版本上傳至雲端，並更新基準快照
-      this._setStatus(SYNC_STATUS.SYNCING, 'Updating cloud data with merged result...');
-      const uploadResult = await this.cloudAdapter.uploadJson(mergedData);
+      let uploadResult = cloudFile;
+      if (cloudNeedsUpdate) {
+        this._setStatus(SYNC_STATUS.SYNCING, 'Uploading merged data to cloud...');
+        uploadResult = await this.cloudAdapter.uploadJson(mergedData);
+      }
 
       const now = Date.now();
       await this._saveSyncState(now, mergedData);
+      this._setStatus(SYNC_STATUS.SUCCESS, 'Sync completed');
 
-      this._setStatus(SYNC_STATUS.SUCCESS, 'Sync complete');
       return {
         success: true,
-        action: 'merged_sync',
+        action: cloudNeedsUpdate && localNeedsUpdate ? 'merged_both' : (cloudNeedsUpdate ? 'uploaded_merge' : (localNeedsUpdate ? 'downloaded_merge' : 'up_to_date')),
         stats: {
           itemsCount: mergedData.items.length,
           tagsCount: mergedData.tags.length,

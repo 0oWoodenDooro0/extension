@@ -35,38 +35,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   await syncCoordinator.init();
 
-  // 建立生命週期長連線至 background.js，當關閉側邊欄或瀏覽器時自動觸發背景 Flush Sync
-  if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.connect === 'function') {
-    try {
-      chrome.runtime.connect({ name: 'sidebar-lifecycle' });
-    } catch {
-      // ignore
-    }
-  }
-
-  // 當頁面隱藏或關閉時，主動通知背景立即保存未同步的變更 (Flush Sync)
-  const handleCloseFlush = () => {
-    if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
-      try {
-        chrome.runtime.sendMessage({ action: 'flushSync' }, () => {
-          if (chrome.runtime.lastError) {
-            syncCoordinator.flushPendingSync().catch(() => {});
-          }
-        });
-        return;
-      } catch {
-        // fallback below
-      }
-    }
-    syncCoordinator.flushPendingSync().catch(() => {});
-  };
-
-  window.addEventListener('pagehide', handleCloseFlush);
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') {
-      handleCloseFlush();
-    }
-  });
+  // 封裝生命週期與 IPC Flush 綁定
+  syncCoordinator.bindLifecycle({ portName: 'sidebar-lifecycle' });
 
   initCloudSyncView({
     googleDriveAdapter,

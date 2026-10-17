@@ -4,8 +4,8 @@
 import { SYNC_STATUS } from './syncCoordinator.js';
 
 export function initCloudSyncView({
-  googleDriveAdapter,
   syncCoordinator,
+  googleDriveAdapter, // 保留參數相容性，所有呼叫皆委派至 syncCoordinator
   onSyncComplete,
   onClose
 }) {
@@ -84,21 +84,19 @@ export function initCloudSyncView({
   if (saveClientIdBtn && clientIdInput) {
     saveClientIdBtn.addEventListener('click', async () => {
       const val = clientIdInput.value.trim();
-      await googleDriveAdapter.saveConfig(val);
+      await syncCoordinator.saveClientConfig(val);
       alert('Google OAuth Client ID saved.');
     });
   }
 
-  // 點擊登入 Google
+  // 點擊登入 Google (透過 syncCoordinator 封裝的 connectAccount)
   if (connectBtn) {
     connectBtn.addEventListener('click', async () => {
       try {
         connectBtn.disabled = true;
         connectBtn.textContent = 'Connecting...';
-        await googleDriveAdapter.authorize(true);
+        await syncCoordinator.connectAccount();
         await updateUI();
-        // 登入後自動執行第一次同步
-        await syncCoordinator.sync();
         if (typeof onSyncComplete === 'function') onSyncComplete();
       } catch (err) {
         alert(`Google Login failed: ${err.message}`);
@@ -109,11 +107,11 @@ export function initCloudSyncView({
     });
   }
 
-  // 登出
+  // 登出 (透過 syncCoordinator 封裝的 disconnectAccount)
   if (disconnectBtn) {
     disconnectBtn.addEventListener('click', async () => {
       if (confirm('Disconnect from Google Drive on this device?')) {
-        await googleDriveAdapter.disconnect();
+        await syncCoordinator.disconnectAccount();
         await updateUI();
       }
     });
@@ -178,32 +176,23 @@ export function initCloudSyncView({
   }
 
   async function updateUI() {
-    const config = await googleDriveAdapter.loadConfig();
+    const summary = await syncCoordinator.getAccountSummary();
     if (clientIdInput) {
-      clientIdInput.value = config.clientId || '';
+      clientIdInput.value = summary.clientId || '';
     }
 
     if (redirectUriText) {
-      redirectUriText.textContent = googleDriveAdapter.getRedirectUri() || '-';
+      redirectUriText.textContent = summary.redirectUri || '-';
     }
 
-    let isAuth = await googleDriveAdapter.isAuthenticated();
-    if (!isAuth && typeof googleDriveAdapter.canAutoConnect === 'function') {
-      const canAuto = await googleDriveAdapter.canAutoConnect();
-      if (canAuto && typeof googleDriveAdapter.ensureAuthenticated === 'function') {
-        isAuth = await googleDriveAdapter.ensureAuthenticated({ allowInteractiveFallback: false });
-      }
-    }
-
-    if (isAuth) {
+    if (summary.isAuthenticated) {
       if (authSection) authSection.style.display = 'none';
       if (connectedSection) connectedSection.style.display = 'block';
 
-      const user = await googleDriveAdapter.getUserInfo();
       if (userEmailSpan) {
-        userEmailSpan.textContent = user?.email || 'Connected User';
+        userEmailSpan.textContent = summary.user?.email || 'Connected User';
       }
-      renderStatusBadge(syncCoordinator.status, null, syncCoordinator.lastSyncTime);
+      renderStatusBadge(summary.status, null, summary.lastSyncTime);
     } else {
       if (authSection) authSection.style.display = 'block';
       if (connectedSection) connectedSection.style.display = 'none';
@@ -218,16 +207,17 @@ export function initCloudSyncView({
     }
 
     if (status === SYNC_STATUS.SYNCING) {
-      syncStatusText.innerHTML = `<span style="color: #2563eb;">● Syncing... (${detail || ''})</span>`;
+      syncStatusText.textContent = detail ? `Syncing: ${detail}` : 'Syncing...';
+      syncStatusText.style.color = '#3b82f6';
     } else if (status === SYNC_STATUS.SUCCESS) {
-      syncStatusText.innerHTML = `<span style="color: #16a34a;">● In sync (Last: ${timeStr})</span>`;
+      syncStatusText.textContent = `Synced (${timeStr})`;
+      syncStatusText.style.color = '#10b981';
     } else if (status === SYNC_STATUS.ERROR) {
-      syncStatusText.innerHTML = `<span style="color: #dc2626;">● Sync Error (${detail || 'Check network'})</span>`;
+      syncStatusText.textContent = detail ? `Error: ${detail}` : 'Sync Error';
+      syncStatusText.style.color = '#ef4444';
     } else {
-      syncStatusText.innerHTML = `<span style="color: #64748b;">● Idle (Last: ${timeStr})</span>`;
+      syncStatusText.textContent = `Idle (${timeStr})`;
+      syncStatusText.style.color = '#6b7280';
     }
   }
-
-  // 初始載入配置
-  googleDriveAdapter.loadConfig().catch(() => {});
 }

@@ -28,21 +28,9 @@ export async function initializeBackgroundSync(
   coordinator = bgSyncCoordinator,
   storageAdapter = bgStorageAdapter
 ) {
-  await coordinator.init();
-
-  // 監聽跨視窗 (Sidebar / Popup) 對本地儲存的異動，僅標記 dirty，不排程倒數同步
-  // 避免平時打字或編輯時觸發多程序快取競爭或刪除剛新增的項目
-  if (storageAdapter && typeof storageAdapter.onChanged === 'function') {
-    storageAdapter.onChanged(async (changes) => {
-      if (coordinator.isApplyingRemoteSync) return;
-      if (changes.sync_in_progress && changes.sync_in_progress.newValue === true) return;
-
-      const hasDataChange = Boolean(changes.items || changes.tags || changes.searchEngines);
-      if (!hasDataChange) return;
-
-      await coordinator.markDirty();
-    });
-  }
+  // 透過 mode: "background" 讓 SyncCoordinator 內部封裝 storage.onChanged 與 dirty tracking，
+  // 避免將 sync_in_progress 與內部狀態洩漏至 background
+  await coordinator.init({ mode: "background" });
 }
 
 initializeBackgroundSync().catch((err) => {

@@ -11,6 +11,7 @@ export const DEFAULT_SYNC_FILENAME = 'collection_data.json';
  */
 export class MemoryGoogleDriveAdapter {
   constructor(initialFiles = {}) {
+    this.clientId = '';
     this.token = null;
     this.userInfo = null;
     this.autoConnect = false;
@@ -30,6 +31,31 @@ export class MemoryGoogleDriveAdapter {
         parents: ['appDataFolder']
       });
     }
+  }
+
+  setClientId(clientId) {
+    this.clientId = (clientId || '').trim();
+  }
+
+  getClientId() {
+    return this.clientId || '';
+  }
+
+  getRedirectUri() {
+    return 'https://mock.chromiumapp.org/';
+  }
+
+  async loadConfig() {
+    return {
+      clientId: this.clientId || '',
+      isAuthenticated: await this.isAuthenticated(),
+      autoConnect: this.autoConnect,
+      user: this.userInfo
+    };
+  }
+
+  async saveConfig(clientId) {
+    this.setClientId(clientId);
   }
 
   setMockAuth({ token = 'mock_token_123', email = 'test@example.com', autoConnect = true } = {}) {
@@ -162,11 +188,13 @@ export class GoogleDriveAdapter {
    * @param {string} [options.clientId] - Google OAuth2 Client ID
    * @param {Object} [options.storage] - Storage adapter for caching auth tokens
    * @param {Object} [options.identity] - Chrome identity seam
+   * @param {Function} [options.fetchImpl] - Injected fetch seam for Node.js / testing
    */
-  constructor({ clientId = '', storage = null, identity = null } = {}) {
+  constructor({ clientId = '', storage = null, identity = null, fetchImpl = null } = {}) {
     this.clientId = clientId;
     this.storage = storage;
     this.identity = identity || (typeof chrome !== 'undefined' ? chrome.identity : null);
+    this.fetchImpl = fetchImpl;
     this.cachedToken = null;
     this.cachedUser = null;
     this.autoConnect = false;
@@ -192,6 +220,14 @@ export class GoogleDriveAdapter {
         }
       });
     }
+  }
+
+  async _fetch(url, options = {}) {
+    const fetchFn = this.fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
+    if (!fetchFn) {
+      throw new Error('fetch implementation is not available.');
+    }
+    return fetchFn(url, options);
   }
 
   setClientId(clientId) {
@@ -266,7 +302,7 @@ export class GoogleDriveAdapter {
   }
 
   /**
-   * 檢查當前是否已具有授權狀態
+   * 檢查當前是否已具備授權狀態
    */
   async isAuthenticated() {
     if (!this.cachedToken) {
@@ -412,7 +448,7 @@ export class GoogleDriveAdapter {
 
   async fetchUserInfo(token) {
     try {
-      const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      const res = await this._fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
@@ -472,8 +508,12 @@ export class GoogleDriveAdapter {
       throw new Error('Not authenticated with Google Drive.');
     }
 
+    if (!this.clientId) {
+      await this.loadConfig();
+    }
+
     const executeRequest = () =>
-      fetch(url, {
+      this._fetch(url, {
         ...options,
         headers: {
           ...(options.headers || {}),
@@ -527,8 +567,7 @@ export class GoogleDriveAdapter {
   /**
    * 下載 appDataFolder 檔案 JSON 內容
    * @param {string} fileId 
-   * @returns {Promise<any>}
-   */
+   * @returns {Promise<any>}\n   */
   async downloadJson(fileId) {
     const url = `${GDRIVE_API_BASE}/files/${encodeURIComponent(fileId)}?alt=media`;
     const res = await this._fetchWithAuth(url);
@@ -544,8 +583,7 @@ export class GoogleDriveAdapter {
    * 上傳或更新 JSON 資料至 appDataFolder
    * @param {Object} data 
    * @param {string} [filename] 
-   * @returns {Promise<{ id: string, name: string, modifiedTime: string }>}
-   */
+   * @returns {Promise<{ id: string, name: string, modifiedTime: string }>}\n   */
   async uploadJson(data, filename = DEFAULT_SYNC_FILENAME) {
     const existingFile = await this.findFile(filename);
     const jsonContent = JSON.stringify(data, null, 2);
