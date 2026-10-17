@@ -21,15 +21,14 @@ Fully engineered under the **Manifest V3 (MV3)** standard, it boasts native comp
 
 ---
 
-## 🛠 Project Architecture & Structure
+## 🛠️ Project Architecture & Structure
 
 The repository is structured into modular deep components to enforce clean boundaries and high maintainability:
 
 ```text
 .
 ├── background.js          # Event-driven background service worker (scrapers, shortcuts, toast HUD)
-├── utils.js               # Search shortcut logic & dynamic context menu managers
-├── searchEngineStore.js   # Deep module for search shortcut persistence & query compilation
+├── searchEngineStore.js   # Deep module for search shortcuts, context menus & query compilation
 ├── tabAdapter.js          # Unified browser tab navigation & JSON download seam
 ├── manifest.json          # Main Manifest V3 configuration (dual side-panel & actions)
 ├── popup/                 # Search Shortcut Settings Popup
@@ -39,18 +38,20 @@ The repository is structured into modular deep components to enforce clean bound
 │   ├── sidebar.html       # Sidebar visual UI with flex designs
 │   ├── sidebar.js         # Navigation router and view controller
 │   ├── backupCoordinator.js # Unified backup export/import coordinator
+│   ├── chipHelper.js      # Shared actor chip parser and DOM chip renderer
 │   ├── highlightHelper.js   # Smooth focus, highlight timer, and image-load alignment
-│   ├── store.js           # Core state management with chrome.storage.local persistence
+│   ├── store.js           # Core state management with active filter state & persistence
 │   ├── itemsView.js       # List layout renderer, sorting, search, and context menu handlers
 │   ├── addItemView.js     # Collection creator and editor form controller
 │   └── manageTagsView.js  # Dedicated tag creator, DND reorder, and cascade list controller
 └── tests/                 # Zero-dependency Unit Test Suite (node:test)
     ├── backupCoordinator.test.js  # Backup generation, schema validation, and restore tests
+    ├── chipHelper.test.js         # Actor chip parser and renderer unit tests
     ├── highlightHelper.test.js    # Focus, scroll, cleanup, and image-realign tests
     ├── imageFetch.test.js         # URL resolution & og:image parser tests
     ├── quickSave.test.js          # Fast collection logic & tab validation tests
     ├── searchEngineStore.test.js  # CRUD, regex compilation, and template tests
-    ├── store.test.js              # Items CRUD, cascade tag updates, and query tests
+    ├── store.test.js              # Items CRUD, cascade tag updates, active filter state, and query tests
     └── tabAdapter.test.js         # Tab placement, batch opening, and JSON download tests
 ```
 
@@ -63,7 +64,7 @@ This extension uses the modern **Manifest V3** standard and native Side Panel AP
 
 1. Clone or download this repository to your local system.
 2. Open your Chromium browser and navigate to `chrome://extensions/`.
-3. In the top-right corner, toggle the **"Developer mode"** switch to **ON**.
+3. In the top-right corner, toggle the **"Developer mode"** switch to **ON** .
 4. In the top-left corner, click **"Load unpacked"**.
 5. Select the root folder of this project (the folder containing `manifest.json`).
 6. The extension is now installed! You can click the extension icon to manage search shortcut settings or open the **Side Panel** from your browser's toolbar dropdown to view your library.

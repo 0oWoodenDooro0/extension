@@ -59,6 +59,7 @@ describe('CollectionStore (Deep Module)', () => {
       assert.strictEqual(updated.title, 'Updated Title');
       assert.strictEqual(updated.url, 'https://example.com/1-modified');
       assert.deepStrictEqual(updated.tags, ['Tag1', 'Tag2']);
+      assert.deepStrictEqual(updated.actors, ['Bob']);
       assert.strictEqual(store.getItems().length, 1);
     });
 
@@ -400,6 +401,184 @@ describe('CollectionStore (Deep Module)', () => {
     });
   });
 
+  describe('Active Filter State Management (Deep Module)', () => {
+    beforeEach(async () => {
+      const item1 = await store.saveItem({
+        title: 'React Documentation',
+        url: 'https://react.dev',
+        tags: ['Frontend', 'JavaScript'],
+        actors: ['Dan Abramov']
+      });
+      item1.addDate = 1000;
+
+      const item2 = await store.saveItem({
+        title: 'Node.js Backend Guide',
+        url: 'https://nodejs.org/guide',
+        tags: ['Backend', 'JavaScript'],
+        actors: ['Ryan Dahl', 'Dan Abramov']
+      });
+      item2.addDate = 2000;
+
+      const item3 = await store.saveItem({
+        title: 'Python ML Guide',
+        url: 'https://python.org',
+        tags: ['AI', 'Python'],
+        actors: ['Guido van Rossum']
+      });
+      item3.addDate = 3000;
+
+      const item4 = await store.saveItem({
+        title: 'Untagged Notes',
+        url: 'https://example.com/untagged',
+        tags: [],
+        actors: ['Anonymous']
+      });
+      item4.addDate = 4000;
+    });
+
+    it('initializes with default filter state', () => {
+      assert.deepStrictEqual(store.getActiveTags(), []);
+      assert.deepStrictEqual(store.getActiveActorFilters(), []);
+      assert.strictEqual(store.getSearchQuery(), '');
+      assert.strictEqual(store.getPendingActorInput(), '');
+      assert.strictEqual(store.isTagActive('All Items'), true);
+      assert.strictEqual(store.isTagActive('Frontend'), false);
+      assert.strictEqual(store.isTagActive(UNTAGGED_TAG), false);
+    });
+
+    it('toggles tag filters and maintains mutual exclusivity with All Items and Untagged', () => {
+      // Toggle a regular tag
+      store.toggleTagFilter('Frontend');
+      assert.deepStrictEqual(store.getActiveTags(), ['Frontend']);
+      assert.strictEqual(store.isTagActive('Frontend'), true);
+      assert.strictEqual(store.isTagActive('All Items'), false);
+
+      // Toggle another regular tag (intersection)
+      store.toggleTagFilter('JavaScript');
+      assert.deepStrictEqual(store.getActiveTags(), ['Frontend', 'JavaScript']);
+
+      // Toggle off Frontend
+      store.toggleTagFilter('Frontend');
+      assert.deepStrictEqual(store.getActiveTags(), ['JavaScript']);
+
+      // Toggle off JavaScript -> reverts to All Items
+      store.toggleTagFilter('JavaScript');
+      assert.deepStrictEqual(store.getActiveTags(), []);
+      assert.strictEqual(store.isTagActive('All Items'), true);
+
+      // Toggle Untagged -> sets [UNTAGGED_TAG]
+      store.toggleTagFilter(UNTAGGED_TAG);
+      assert.deepStrictEqual(store.getActiveTags(), [UNTAGGED_TAG]);
+      assert.strictEqual(store.isTagActive(UNTAGGED_TAG), true);
+      assert.strictEqual(store.isTagActive('All Items'), false);
+
+      // Selecting a regular tag clears Untagged
+      store.toggleTagFilter('Backend');
+      assert.deepStrictEqual(store.getActiveTags(), ['Backend']);
+      assert.strictEqual(store.isTagActive(UNTAGGED_TAG), false);
+
+      // Selecting Untagged clears regular tags
+      store.toggleTagFilter(UNTAGGED_TAG);
+      assert.deepStrictEqual(store.getActiveTags(), [UNTAGGED_TAG]);
+
+      // Toggle Untagged off -> reverts to All Items
+      store.toggleTagFilter(UNTAGGED_TAG);
+      assert.deepStrictEqual(store.getActiveTags(), []);
+      assert.strictEqual(store.isTagActive('All Items'), true);
+
+      // Explicit setAllItemsFilter / toggle 'All Items'
+      store.toggleTagFilter('Frontend');
+      assert.strictEqual(store.isTagActive('Frontend'), true);
+      store.toggleTagFilter('All Items');
+      assert.deepStrictEqual(store.getActiveTags(), []);
+      assert.strictEqual(store.isTagActive('All Items'), true);
+    });
+
+    it('manages actor filters with comma parsing, deduplication, and removal', () => {
+      store.addActorFilter('Dan Abramov');
+      assert.deepStrictEqual(store.getActiveActorFilters(), ['Dan Abramov']);
+
+      // Comma-separated with trimming and deduplication
+      store.addActorFilter('Ryan Dahl, Guido van Rossum, Dan Abramov,   ');
+      assert.deepStrictEqual(store.getActiveActorFilters(), [
+        'Dan Abramov',
+        'Ryan Dahl',
+        'Guido van Rossum'
+      ]);
+
+      // Remove single actor
+      store.removeActorFilter('Ryan Dahl');
+      assert.deepStrictEqual(store.getActiveActorFilters(), [
+        'Dan Abramov',
+        'Guido van Rossum'
+      ]);
+
+      // Pending actor input
+      store.setPendingActorInput('Brendan Eich');
+      assert.strictEqual(store.getPendingActorInput(), 'Brendan Eich');
+
+      // Clear actor filters
+      store.clearActorFilters();
+      assert.deepStrictEqual(store.getActiveActorFilters(), []);
+      assert.strictEqual(store.getPendingActorInput(), '');
+    });
+
+    it('manages search query and resetFilters', () => {
+      store.setSearchQuery('  react tutorial  ');
+      assert.strictEqual(store.getSearchQuery(), 'react tutorial');
+
+      store.toggleTagFilter('Frontend');
+      store.addActorFilter('Dan Abramov');
+      store.setPendingActorInput('partial');
+
+      store.resetFilters();
+      assert.deepStrictEqual(store.getActiveTags(), []);
+      assert.deepStrictEqual(store.getActiveActorFilters(), []);
+      assert.strictEqual(store.getSearchQuery(), '');
+      assert.strictEqual(store.getPendingActorInput(), '');
+      assert.strictEqual(store.isTagActive('All Items'), true);
+    });
+
+    it('getFilteredItems and getRandomFilteredItem query via active filter state', () => {
+      // 1. Initial All Items
+      let items = store.getFilteredItems();
+      assert.strictEqual(items.length, 4);
+
+      // 2. Filter by Tag
+      store.toggleTagFilter('JavaScript');
+      items = store.getFilteredItems();
+      assert.strictEqual(items.length, 2); // React Doc & Node.js Guide
+
+      // 3. Add Actor Filter
+      store.addActorFilter('Ryan Dahl');
+      items = store.getFilteredItems();
+      assert.strictEqual(items.length, 1);
+      assert.strictEqual(items[0].title, 'Node.js Backend Guide');
+
+      // 4. Random Item from active filter
+      const random = store.getRandomFilteredItem();
+      assert.ok(random);
+      assert.strictEqual(random.title, 'Node.js Backend Guide');
+
+      // 5. With Pending Actor Input that narrows results
+      store.clearActorFilters();
+      store.setPendingActorInput('Dan');
+      items = store.getFilteredItems();
+      assert.strictEqual(items.length, 2); // both JS items have Dan Abramov
+
+      // 6. With Search Query
+      store.setSearchQuery('backend');
+      items = store.getFilteredItems();
+      assert.strictEqual(items.length, 1);
+      assert.strictEqual(items[0].title, 'Node.js Backend Guide');
+
+      // 7. No match random item
+      store.setSearchQuery('non-existent');
+      assert.strictEqual(store.getFilteredItems().length, 0);
+      assert.strictEqual(store.getRandomFilteredItem(), null);
+    });
+  });
+
   describe('Import & Export Portability', () => {
     it('exports clean snapshot of current state', async () => {
       await store.addTag('TagA');
@@ -464,4 +643,3 @@ describe('CollectionStore (Deep Module)', () => {
     });
   });
 });
-

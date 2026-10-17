@@ -1,6 +1,14 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { SearchEngineStore, MemoryStorageAdapter } from '../searchEngineStore.js';
+import {
+  SearchEngineStore,
+  MemoryStorageAdapter,
+  searchEngineStore,
+  rebuildContextMenus,
+  performSearch,
+  initializeSearchShortcuts
+} from '../searchEngineStore.js';
+import { BrowserTabAdapter, MemoryTabAdapter } from '../tabAdapter.js';
 
 describe('SearchEngineStore (Deep Module)', () => {
   let adapter;
@@ -255,6 +263,124 @@ describe('SearchEngineStore (Deep Module)', () => {
       assert.strictEqual(await store.importData(null), false);
       assert.strictEqual(await store.importData({}), false);
       assert.strictEqual(await store.importData('string'), false);
+    });
+  });
+
+  describe('Context Menus & Search Actions (Deep Module Integration)', () => {
+    let mockTabAdapter;
+
+    beforeEach(() => {
+      mockTabAdapter = new BrowserTabAdapter(new MemoryTabAdapter({
+        activeTab: { id: 101, index: 1 }
+      }));
+    });
+
+    it('performSearch opens adjacent tab with compiled search URL', async () => {
+      const engine = await store.saveEngine({
+        title: 'GitHub Repo Search',
+        urlTemplate: 'https://github.com/search?q={query}'
+      });
+
+      const currentTab = { id: 101, index: 1 };
+      performSearch('deep module pattern', engine, currentTab, store, mockTabAdapter);
+
+      const created = mockTabAdapter.adapter.createdTabs;
+      assert.strictEqual(created.length, 1);
+      assert.strictEqual(created[0].url, 'https://github.com/search?q=deep%20module%20pattern');
+      assert.strictEqual(created[0].index, 2);
+      assert.strictEqual(created[0].openerTabId, 101);
+      assert.strictEqual(created[0].active, true);
+    });
+
+    it('performSearch returns early without opening tab if URL cannot be compiled', () => {
+      performSearch('test', null, null, store, mockTabAdapter);
+      assert.strictEqual(mockTabAdapter.adapter.createdTabs.length, 0);
+    });
+
+    it('rebuildContextMenus registers menu items for all engines in store', async () => {
+      await store.saveEngine({ title: 'Engine 1', urlTemplate: 'https://1.com?q={query}' });
+      await store.saveEngine({ title: 'Engine 2', urlTemplate: 'https://2.com?q={query}' });
+
+      const createdItems = [];
+      let removedAll = false;
+
+      const mockContextMenus = {
+        removeAll(callback) {
+          removedAll = true;
+          callback();
+        },
+        create(props) {
+          createdItems.push(props);
+        }
+      };
+
+      rebuildContextMenus(store, mockContextMenus);
+
+      assert.strictEqual(removedAll, true);
+      assert.strictEqual(createdItems.length, 2);
+      assert.strictEqual(createdItems[0].title, 'Engine 1');
+      assert.deepStrictEqual(createdItems[0].contexts, ['selection']);
+      assert.strictEqual(createdItems[1].title, 'Engine 2');
+    });
+
+    it('rebuildContextMenus handles null or undefined contextMenus gracefully', () => {
+      assert.doesNotThrow(() => {
+        rebuildContextMenus(store, null);
+      });
+    });
+
+    it('initializeSearchShortcuts sets up listeners and rebuilds menus on data change', async () => {
+      let startupListener = null;
+      let installedListener = null;
+      let clickedListener = null;
+      const createdItems = [];
+
+      const mockRuntime = {
+        onStartup: {
+          addListener(fn) { startupListener = fn; }
+        },
+        onInstalled: {
+          addListener(fn) { installedListener = fn; }
+        }
+      };
+
+      const mockContextMenus = {
+        removeAll(callback) {
+          createdItems.length = 0;
+          if (callback) callback();
+        },
+        create(props) {
+          createdItems.push(props);
+        },
+        onClicked: {
+          addListener(fn) { clickedListener = fn; }
+        }
+      };
+
+      await initializeSearchShortcuts({
+        store,
+        contextMenusApi: mockContextMenus,
+        runtimeApi: mockRuntime,
+        navigationAdapter: mockTabAdapter
+      });
+
+      assert.ok(typeof startupListener === 'function');
+      assert.ok(typeof installedListener === 'function');
+      assert.ok(typeof clickedListener === 'function');
+
+      // Adding an engine triggers rebuild via store subscription
+      await store.saveEngine({ title: 'Dynamic Engine', urlTemplate: 'https://dyn.com?q={query}' });
+      assert.strictEqual(createdItems.length, 1);
+      assert.strictEqual(createdItems[0].title, 'Dynamic Engine');
+
+      // Clicking menu triggers search
+      await clickedListener(
+        { menuItemId: createdItems[0].id, selectionText: 'hello context' },
+        { id: 200, index: 5 }
+      );
+
+      assert.strictEqual(mockTabAdapter.adapter.createdTabs.length, 1);
+      assert.strictEqual(mockTabAdapter.adapter.createdTabs[0].url, 'https://dyn.com?q=hello%20context');
     });
   });
 });

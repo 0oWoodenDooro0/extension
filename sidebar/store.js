@@ -1,5 +1,5 @@
 // store.js - 深度資料模組 (Deep Collection Module)
-// 封裝所有項目 CRUD、標籤串聯異動、項目去重、ID/時間戳生成與儲存持久化
+// 封裝所有項目 CRUD、標籤串聯異動、項目去重、ID/時間戳生成與儲存持久化、以及側邊欄 Active Filter 狀態
 
 export const UNTAGGED_TAG = '_UNTAGGED_';
 
@@ -110,6 +110,14 @@ export class CollectionStore {
     this.isLoaded = false;
     this.isPersisting = false;
 
+    // 內部過濾狀態 (封裝於 Store 中，避免散落於 View 元件)
+    this._filterState = {
+      activeTags: [], // 空陣列表示 "All Items"
+      activeActors: [],
+      pendingActorInput: '',
+      searchQuery: ''
+    };
+
     // 監聽外部/多視窗同步
     this.unsubscribeStorage = this.adapter.onChanged((changes) => {
       if (this.isPersisting) return;
@@ -218,62 +226,66 @@ export class CollectionStore {
   /**
    * 多維度查詢與過濾項目 (支援標籤交集、未分類、演員比對、全文模糊搜尋與排序)
    */
-  queryItems(options = {}) {
-    const {
-      tags = [],
-      untagged = false,
-      actor = '',
-      actors = [],
-      search = '',
-      sortBy = 'addDate',
-      sortOrder = 'desc'
-    } = options;
-
+  queryItems({
+    tags = null,
+    untagged = false,
+    actor = null,
+    actors = null,
+    search = '',
+    sortBy = 'addDate',
+    sortOrder = 'desc'
+  } = {}) {
     let results = [...this.items];
 
-    // 1. 標籤與未分類過濾 (Tag & Untagged Scope)
-    const isUntaggedRequested = untagged || (Array.isArray(tags) && tags.includes(UNTAGGED_TAG));
-
-    if (isUntaggedRequested) {
+    // 1. 標籤過濾 (支援多標籤交集 或 UNTAGGED_TAG)
+    if (untagged) {
       results = results.filter(item => !item.tags || item.tags.length === 0);
     } else if (Array.isArray(tags) && tags.length > 0) {
-      const activeTags = tags.filter(t => t && t !== UNTAGGED_TAG);
-      if (activeTags.length > 0) {
-        results = results.filter(item =>
-          Array.isArray(item.tags) && activeTags.every(t => item.tags.includes(t))
-        );
+      if (tags.includes(UNTAGGED_TAG)) {
+        results = results.filter(item => !item.tags || item.tags.length === 0);
+      } else {
+        // 多標籤交集 (Intersection): 必須包含 tags 清單中的所有指定標籤
+        results = results.filter(item => {
+          if (!Array.isArray(item.tags)) return false;
+          return tags.every(reqTag => item.tags.includes(reqTag));
+        });
       }
     }
 
-    // 2. 演員過濾 (Actor Substring Match & Multi-actor intersection)
-    let filterActors = [];
+    // 2. 演員比對 (支援單一演員 actor 或多演員交集 actors)
+    const requiredActors = [];
+    if (actor && actor.trim()) {
+      requiredActors.push(actor.trim().toLowerCase());
+    }
     if (Array.isArray(actors)) {
-      filterActors = actors.map(a => (a ? String(a).trim().toLowerCase() : '')).filter(Boolean);
-    }
-    if (actor && typeof actor === 'string') {
-      const cleanSingle = actor.trim().toLowerCase();
-      if (cleanSingle && !filterActors.includes(cleanSingle)) {
-        filterActors.push(cleanSingle);
-      }
+      actors.forEach(a => {
+        if (a && typeof a === 'string' && a.trim()) {
+          const lower = a.trim().toLowerCase();
+          if (!requiredActors.includes(lower)) {
+            requiredActors.push(lower);
+          }
+        }
+      });
     }
 
-    if (filterActors.length > 0) {
+    if (requiredActors.length > 0) {
       results = results.filter(item => {
-        const itemActors = Array.isArray(item.actors) ? item.actors : [];
-        return filterActors.every(target =>
-          itemActors.some(a => (a || '').toLowerCase().includes(target))
+        if (!Array.isArray(item.actors) || item.actors.length === 0) return false;
+        const itemActorsLower = item.actors.map(a => (a || '').toLowerCase());
+        // 必須滿足所有指定的演員 (支援不區分大小寫之子字串比對)
+        return requiredActors.every(req =>
+          itemActorsLower.some(act => act.includes(req))
         );
       });
     }
 
-    // 3. 全文搜尋 (Search across title, url, actors)
-    const cleanSearch = (search || '').trim().toLowerCase();
-    if (cleanSearch) {
+    // 3. 全文模糊搜尋 (比對 title, url, 以及 actors)
+    if (search && search.trim()) {
+      const searchLower = search.trim().toLowerCase();
       results = results.filter(item => {
-        const titleMatch = item.title && item.title.toLowerCase().includes(cleanSearch);
-        const urlMatch = item.url && item.url.toLowerCase().includes(cleanSearch);
-        const actors = Array.isArray(item.actors) ? item.actors : [];
-        const actorMatch = actors.some(a => (a || '').toLowerCase().includes(cleanSearch));
+        const titleMatch = item.title && item.title.toLowerCase().includes(searchLower);
+        const urlMatch = item.url && item.url.toLowerCase().includes(searchLower);
+        const actorMatch = Array.isArray(item.actors) && item.actors.some(a => a && a.toLowerCase().includes(searchLower));
         return titleMatch || urlMatch || actorMatch;
       });
     }
@@ -308,6 +320,135 @@ export class CollectionStore {
     return matchedItems[randomIndex];
   }
 
+  // --- Active Filter State 管理介面 (Deep Module) ---
+
+  getActiveTags() {
+    return [...this._filterState.activeTags];
+  }
+
+  getActiveActorFilters() {
+    return [...this._filterState.activeActors];
+  }
+
+  getSearchQuery() {
+    return this._filterState.searchQuery;
+  }
+
+  getPendingActorInput() {
+    return this._filterState.pendingActorInput;
+  }
+
+  isTagActive(tag) {
+    if (tag === 'All Items') {
+      return this._filterState.activeTags.length === 0;
+    }
+    return this._filterState.activeTags.includes(tag);
+  }
+
+  toggleTagFilter(tag) {
+    if (!tag || tag === 'All Items') {
+      this._filterState.activeTags = [];
+      return;
+    }
+
+    if (tag === UNTAGGED_TAG) {
+      if (this._filterState.activeTags.includes(UNTAGGED_TAG)) {
+        this._filterState.activeTags = [];
+      } else {
+        this._filterState.activeTags = [UNTAGGED_TAG];
+      }
+      return;
+    }
+
+    // 一般標籤：若先前有 UNTAGGED_TAG 則清除
+    let currentTags = this._filterState.activeTags.filter(t => t !== UNTAGGED_TAG);
+    const index = currentTags.indexOf(tag);
+    if (index > -1) {
+      currentTags.splice(index, 1);
+    } else {
+      currentTags.push(tag);
+    }
+    this._filterState.activeTags = currentTags;
+  }
+
+  setAllItemsFilter() {
+    this._filterState.activeTags = [];
+  }
+
+  resetTagFilters() {
+    this._filterState.activeTags = [];
+  }
+
+  addActorFilter(actorInput) {
+    if (!actorInput) return;
+    const items = Array.isArray(actorInput) ? actorInput : actorInput.split(',');
+    items.forEach(raw => {
+      const trimmed = (raw || '').trim();
+      if (trimmed && !this._filterState.activeActors.includes(trimmed)) {
+        this._filterState.activeActors.push(trimmed);
+      }
+    });
+  }
+
+  removeActorFilter(actor) {
+    if (!actor) return;
+    const clean = actor.trim();
+    this._filterState.activeActors = this._filterState.activeActors.filter(a => a !== clean);
+  }
+
+  clearActorFilters() {
+    this._filterState.activeActors = [];
+    this._filterState.pendingActorInput = '';
+  }
+
+  setPendingActorInput(input) {
+    this._filterState.pendingActorInput = (input || '').trim();
+  }
+
+  setSearchQuery(query) {
+    this._filterState.searchQuery = (query || '').trim();
+  }
+
+  resetFilters() {
+    this._filterState.activeTags = [];
+    this._filterState.activeActors = [];
+    this._filterState.pendingActorInput = '';
+    this._filterState.searchQuery = '';
+  }
+
+  getFilteredItems(options = {}) {
+    const queryOpts = { ...options };
+
+    if (this._filterState.activeTags.length > 0) {
+      if (this._filterState.activeTags.includes(UNTAGGED_TAG)) {
+        queryOpts.untagged = true;
+      } else {
+        queryOpts.tags = [...this._filterState.activeTags];
+      }
+    }
+
+    const actors = [...this._filterState.activeActors];
+    if (this._filterState.pendingActorInput) {
+      actors.push(this._filterState.pendingActorInput);
+    }
+    if (actors.length > 0) {
+      queryOpts.actors = actors;
+    }
+
+    if (this._filterState.searchQuery) {
+      queryOpts.search = this._filterState.searchQuery;
+    }
+
+    return this.queryItems(queryOpts);
+  }
+
+  getRandomFilteredItem(options = {}) {
+    const matched = this.getFilteredItems(options);
+    if (!matched || matched.length === 0) return null;
+    const randomIndex = Math.floor(Math.random() * matched.length);
+    return matched[randomIndex];
+  }
+
   // --- 項目異動介面 (Item Mutation Interface) ---
 
   /**
@@ -329,29 +470,28 @@ export class CollectionStore {
     if (id) {
       targetItem = this.items.find(i => i.id === id);
     } else {
-      // 依據 URL 檢查是否已存在
       targetItem = this.items.find(i => i.url === cleanUrl);
     }
 
     if (targetItem) {
-      // 編輯更新現有項目
       targetItem.title = cleanTitle;
       targetItem.url = cleanUrl;
       targetItem.tags = cleanTags;
-      targetItem.imageUrl = cleanImageUrl;
       targetItem.actors = cleanActors;
+      if (cleanImageUrl) {
+        targetItem.imageUrl = cleanImageUrl;
+      }
       targetItem.updatedAt = now;
     } else {
-      // 建立全新項目
       targetItem = {
         id: id || generateUniqueId(),
         title: cleanTitle,
         url: cleanUrl,
-        tags: cleanTags,
-        addDate: now,
-        updatedAt: now,
         imageUrl: cleanImageUrl,
-        actors: cleanActors
+        tags: cleanTags,
+        actors: cleanActors,
+        addDate: now,
+        updatedAt: now
       };
       this.items.push(targetItem);
     }
@@ -362,31 +502,32 @@ export class CollectionStore {
   }
 
   /**
-   * 刪除項目
+   * 刪除指定 ID 之項目
    */
   async deleteItem(id) {
-    const index = this.items.findIndex(i => i.id === id);
-    if (index === -1) return false;
-
-    const [deletedItem] = this.items.splice(index, 1);
-    await this.persist();
-    this.notify({ type: 'itemDeleted', item: deletedItem });
-    return true;
+    const prevCount = this.items.length;
+    this.items = this.items.filter(i => i.id !== id);
+    if (this.items.length !== prevCount) {
+      await this.persist();
+      this.notify({ type: 'itemDeleted', id });
+      return true;
+    }
+    return false;
   }
 
-  // --- 標籤管理與串聯異動 (Tag Operations & Cascades) ---
+  // --- 標籤異動介面 (Tag Mutation Interface) ---
 
   /**
-   * 新增標籤
+   * 新增標籤 (去重、濾除空白)
    */
   async addTag(tagName) {
-    const cleanName = tagName ? tagName.trim() : '';
-    if (!cleanName || this.tags.includes(cleanName)) {
+    const clean = tagName ? tagName.trim() : '';
+    if (!clean || this.tags.includes(clean)) {
       return false;
     }
-    this.tags.push(cleanName);
+    this.tags.push(clean);
     await this.persist();
-    this.notify({ type: 'tagAdded', tag: cleanName });
+    this.notify({ type: 'tagAdded', tag: clean });
     return true;
   }
 
@@ -415,6 +556,11 @@ export class CollectionStore {
       }
     });
 
+    // 3. 串聯更新 Active Filter 狀態
+    if (this._filterState.activeTags.includes(cleanOld)) {
+      this._filterState.activeTags = this._filterState.activeTags.map(t => (t === cleanOld ? cleanNew : t));
+    }
+
     await this.persist();
     this.notify({ type: 'tagRenamed', oldTag: cleanOld, newTag: cleanNew });
     return true;
@@ -438,6 +584,11 @@ export class CollectionStore {
         item.updatedAt = now;
       }
     });
+
+    // 3. 串聯從 Active Filter 狀態中移除
+    if (this._filterState.activeTags.includes(cleanName)) {
+      this._filterState.activeTags = this._filterState.activeTags.filter(t => t !== cleanName);
+    }
 
     await this.persist();
     this.notify({ type: 'tagDeleted', tag: cleanName });

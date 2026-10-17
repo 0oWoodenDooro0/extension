@@ -25,14 +25,7 @@ export function initManageTagsView(injectedCallbacks) {
 }
 
 /**
- * 顯示並渲染標籤管理列表
- */
-export function showManageTagsView() {
-  displayManageTagList();
-}
-
-/**
- * 渲染列表 (公開函數，供 Controller 在 storage 更新時呼叫)
+ * 渲染標籤清單
  */
 export function displayManageTagList() {
   if (!manageTagList) return;
@@ -78,6 +71,8 @@ export function displayManageTagList() {
     manageTagList.appendChild(li);
   });
 }
+
+export const showManageTagsView = displayManageTagList;
 
 // --- Internal Logic ---
 

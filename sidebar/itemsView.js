@@ -2,12 +2,7 @@
 import { collectionStore, UNTAGGED_TAG } from './store.js';
 import { tabAdapter } from '../tabAdapter.js';
 import { highlightAndScrollToItem } from './highlightHelper.js';
-
-// --- Local State for this view ---
-let currentTag = "All Items";
-let activeFilters = [];
-let activeActorFilters = [];
-let currentActorFilter = "";
+import { renderActorChips } from './chipHelper.js';
 
 // --- DOM Elements ---
 let itemList, itemSearchInput, tagFilterContainer;
@@ -34,6 +29,7 @@ export function initItemsView(injectedCallbacks) {
   // 搜尋防抖：延遲執行 refreshItemsList
   if (itemSearchInput) {
     itemSearchInput.addEventListener('input', () => {
+      collectionStore.setSearchQuery(itemSearchInput.value);
       if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
       searchDebounceTimer = setTimeout(() => {
         refreshItemsList();
@@ -45,13 +41,14 @@ export function initItemsView(injectedCallbacks) {
   if (clearBtn) {
     clearBtn.addEventListener('click', () => {
       if (itemSearchInput) itemSearchInput.value = '';
+      collectionStore.setSearchQuery('');
       refreshItemsList();
     });
   }
 
   if (actorFilterInput) {
     actorFilterInput.addEventListener('input', (e) => {
-      currentActorFilter = e.target.value.trim();
+      collectionStore.setPendingActorInput(e.target.value);
       refreshItemsList();
     });
 
@@ -116,7 +113,11 @@ function setupListEventDelegation() {
 }
 
 export function displayItemsByTag(tag) {
-  currentTag = tag;
+  if (tag === 'All Items') {
+    collectionStore.setAllItemsFilter();
+  } else {
+    collectionStore.toggleTagFilter(tag);
+  }
   populateTagFilterBar();
   populateActorFilterOptions();
   renderActorFilterChips();
@@ -130,54 +131,26 @@ export function refreshItemsList() {
 // --- Internal Helper Functions ---
 
 function handleAddActorFilter() {
-  const val = actorFilterInput ? actorFilterInput.value.trim() : '';
-  if (!val) return;
+  const val = actorFilterInput ? actorFilterInput.value : '';
+  if (!val || !val.trim()) return;
 
-  const names = val.split(',').map(s => s.trim()).filter(Boolean);
-  names.forEach(name => {
-    if (!activeActorFilters.includes(name)) {
-      activeActorFilters.push(name);
-    }
-  });
+  collectionStore.addActorFilter(val);
+  collectionStore.setPendingActorInput('');
 
   if (actorFilterInput) actorFilterInput.value = '';
-  currentActorFilter = '';
   renderActorFilterChips();
   refreshItemsList();
 }
 
 function renderActorFilterChips() {
-  if (!selectedActorFiltersContainer) return;
-  selectedActorFiltersContainer.innerHTML = '';
-
-  if (activeActorFilters.length === 0) {
-    selectedActorFiltersContainer.style.display = 'none';
-    return;
-  }
-
-  selectedActorFiltersContainer.style.display = 'flex';
-  activeActorFilters.forEach(actor => {
-    const chip = document.createElement('span');
-    chip.className = 'actor-chip';
-
-    const nameSpan = document.createElement('span');
-    nameSpan.innerText = actor;
-
-    const removeBtn = document.createElement('button');
-    removeBtn.type = 'button';
-    removeBtn.className = 'remove-actor-filter';
-    removeBtn.innerHTML = '&times;';
-    removeBtn.title = 'Remove actor filter';
-    removeBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      activeActorFilters = activeActorFilters.filter(a => a !== actor);
+  renderActorChips(selectedActorFiltersContainer, collectionStore.getActiveActorFilters(), {
+    removeButtonClass: 'remove-actor-filter',
+    removeTitle: 'Remove actor filter',
+    onRemove: (actor) => {
+      collectionStore.removeActorFilter(actor);
       renderActorFilterChips();
       refreshItemsList();
-    });
-
-    chip.appendChild(nameSpan);
-    chip.appendChild(removeBtn);
-    selectedActorFiltersContainer.appendChild(chip);
+    }
   });
 }
 
@@ -201,16 +174,17 @@ function populateTagFilterBar() {
   tagFilterContainer.innerHTML = '';
 
   const fragment = document.createDocumentFragment();
+  const activeTags = collectionStore.getActiveTags();
 
   // 1. Untagged 按鈕
-  const untaggedBtn = createFilterButton('Untagged', activeFilters.includes(UNTAGGED_TAG));
+  const untaggedBtn = createFilterButton('Untagged', activeTags.includes(UNTAGGED_TAG));
   untaggedBtn.addEventListener('click', () => toggleFilter(UNTAGGED_TAG));
   fragment.appendChild(untaggedBtn);
 
   // 2. 一般標籤按鈕
   const tags = collectionStore.getTags();
   tags.forEach(tag => {
-    const button = createFilterButton(tag, activeFilters.includes(tag));
+    const button = createFilterButton(tag, activeTags.includes(tag));
     button.addEventListener('click', () => toggleFilter(tag));
     fragment.appendChild(button);
   });
@@ -227,36 +201,13 @@ function createFilterButton(text, isSelected) {
 }
 
 function toggleFilter(filterKey) {
-  if (filterKey === UNTAGGED_TAG) {
-    if (activeFilters.includes(UNTAGGED_TAG)) {
-      activeFilters = [];
-    } else {
-      activeFilters = [UNTAGGED_TAG];
-    }
-  } else {
-    if (activeFilters.includes(UNTAGGED_TAG)) {
-      activeFilters = [];
-    }
-    if (activeFilters.includes(filterKey)) {
-      activeFilters = activeFilters.filter(f => f !== filterKey);
-    } else {
-      activeFilters.push(filterKey);
-    }
-  }
+  collectionStore.toggleTagFilter(filterKey);
   populateTagFilterBar();
   refreshItemsList();
 }
 
 function getFilteredItems() {
-  const searchTerm = itemSearchInput ? itemSearchInput.value : '';
-  const actorsToQuery = [...activeActorFilters];
-  if (currentActorFilter && !actorsToQuery.includes(currentActorFilter)) {
-    actorsToQuery.push(currentActorFilter);
-  }
-  return collectionStore.queryItems({
-    tags: activeFilters,
-    actors: actorsToQuery,
-    search: searchTerm,
+  return collectionStore.getFilteredItems({
     sortBy: 'addDate',
     sortOrder: 'desc'
   });
@@ -351,16 +302,7 @@ async function openAllItems() {
 }
 
 async function randomItem() {
-  const searchTerm = itemSearchInput ? itemSearchInput.value : '';
-  const actorsToQuery = [...activeActorFilters];
-  if (currentActorFilter && !actorsToQuery.includes(currentActorFilter)) {
-    actorsToQuery.push(currentActorFilter);
-  }
-  const randomItem = collectionStore.getRandomItem({
-    tags: activeFilters,
-    actors: actorsToQuery,
-    search: searchTerm
-  });
+  const randomItem = collectionStore.getRandomFilteredItem();
 
   if (randomItem && randomItem.url) {
     await tabAdapter.openAdjacent(randomItem.url);

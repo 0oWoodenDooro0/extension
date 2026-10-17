@@ -1,5 +1,7 @@
 // searchEngineStore.js - 快捷搜尋深層模組 (Deep Search Engine Module)
-// 封裝搜尋引擎項目的 CRUD、儲存適配器、正規表達式解析替換、URL 模板編譯與跨視窗狀態同步
+// 封裝搜尋引擎項目的 CRUD、儲存適配器、正規表達式解析替換、URL 模板編譯與跨視窗狀態同步、右鍵選單同步與分頁開啟導航
+
+import { tabAdapter } from './tabAdapter.js';
 
 let engineIdCounter = 0;
 function generateEngineId() {
@@ -180,9 +182,6 @@ export class SearchEngineStore {
 
   // --- 項目異動介面 (Mutation Interface) ---
 
-  /**
-   * 新增或更新搜尋引擎
-   */
   async saveEngine({ id, title, urlTemplate, queryRegex, queryReplacement }) {
     if (!title || !title.trim()) {
       throw new Error('Engine title is required.');
@@ -225,9 +224,6 @@ export class SearchEngineStore {
     return targetEngine;
   }
 
-  /**
-   * 刪除搜尋引擎
-   */
   async deleteEngine(id) {
     const index = this.engines.findIndex(e => e.id === id);
     if (index === -1) return false;
@@ -240,9 +236,6 @@ export class SearchEngineStore {
 
   // --- 正規表達式與 URL 編譯介面 (Format & URL Interface) ---
 
-  /**
-   * 根據正規表達式與替換規則格式化查詢字串
-   */
   formatQuery(query, engineOrId) {
     if (!query) return '';
     const engine = typeof engineOrId === 'string' ? this.getEngineById(engineOrId) : engineOrId;
@@ -263,9 +256,6 @@ export class SearchEngineStore {
     }
   }
 
-  /**
-   * 編譯搜尋目標 URL (自動處理正規表達式轉換與 URI 編碼)
-   */
   buildSearchUrl(query, engineOrId) {
     const engine = typeof engineOrId === 'string' ? this.getEngineById(engineOrId) : engineOrId;
     if (!engine || !engine.urlTemplate) {
@@ -279,6 +269,39 @@ export class SearchEngineStore {
     return engine.urlTemplate
       .replace(/\{id\}/g, encoded)
       .replace(/\{query\}/g, encoded);
+  }
+
+  // --- Context Menus & Search Actions ---
+
+  /**
+   * 根據當前設定動態重建右鍵選單項目
+   */
+  rebuildContextMenus(contextMenusApi = (typeof chrome !== 'undefined' ? chrome.contextMenus : null)) {
+    if (!contextMenusApi || typeof contextMenusApi.removeAll !== 'function') return;
+
+    contextMenusApi.removeAll(() => {
+      this.getEngines().forEach((engine) => {
+        if (typeof contextMenusApi.create === 'function') {
+          contextMenusApi.create({
+            id: engine.id,
+            title: engine.title,
+            contexts: ["selection"]
+          });
+        }
+      });
+    });
+  }
+
+  /**
+   * 開啟相鄰分頁進行搜尋
+   */
+  performSearch(query, engineOrId, currentTab, navigationAdapter = tabAdapter) {
+    const searchUrl = this.buildSearchUrl(query, engineOrId);
+    if (!searchUrl) return;
+
+    if (navigationAdapter && typeof navigationAdapter.openAdjacent === 'function') {
+      navigationAdapter.openAdjacent(searchUrl, { tab: currentTab, active: true });
+    }
   }
 
   // --- 資料匯出入 (Portability) ---
@@ -303,3 +326,84 @@ export class SearchEngineStore {
 
 // 預設全域 Singleton 實例
 export const searchEngineStore = new SearchEngineStore();
+
+/**
+ * 依據 active search engine 動態重建右鍵選單
+ */
+export function rebuildContextMenus(
+  store = searchEngineStore,
+  contextMenusApi = (typeof chrome !== 'undefined' ? chrome.contextMenus : null)
+) {
+  if (store && typeof store.rebuildContextMenus === 'function') {
+    store.rebuildContextMenus(contextMenusApi);
+  }
+}
+
+/**
+ * 開啟搜尋分頁
+ */
+export function performSearch(
+  query,
+  engineOrId,
+  currentTab,
+  store = searchEngineStore,
+  navigationAdapter = tabAdapter
+) {
+  if (store && typeof store.performSearch === 'function') {
+    store.performSearch(query, engineOrId, currentTab, navigationAdapter);
+  }
+}
+
+/**
+ * 初始化搜尋快捷鍵、選單事件與 Store 變更監聽
+ */
+export async function initializeSearchShortcuts(options = {}) {
+  let store = searchEngineStore;
+  let contextMenusApi = typeof chrome !== 'undefined' ? chrome.contextMenus : null;
+  let runtimeApi = typeof chrome !== 'undefined' ? chrome.runtime : null;
+  let navigationAdapter = tabAdapter;
+
+  if (options instanceof SearchEngineStore) {
+    store = options;
+  } else if (options && typeof options === 'object') {
+    if (options.store) store = options.store;
+    if (options.contextMenusApi !== undefined) contextMenusApi = options.contextMenusApi;
+    if (options.runtimeApi !== undefined) runtimeApi = options.runtimeApi;
+    if (options.navigationAdapter !== undefined) navigationAdapter = options.navigationAdapter;
+  }
+
+  const setupContextMenus = async () => {
+    await store.load();
+    rebuildContextMenus(store, contextMenusApi);
+  };
+
+  // 同步註冊事件監聽，以確保 Manifest V3 service worker 首 tick 完成註冊
+  if (runtimeApi && runtimeApi.onStartup && typeof runtimeApi.onStartup.addListener === 'function') {
+    runtimeApi.onStartup.addListener(setupContextMenus);
+  }
+  if (runtimeApi && runtimeApi.onInstalled && typeof runtimeApi.onInstalled.addListener === 'function') {
+    runtimeApi.onInstalled.addListener(setupContextMenus);
+  }
+
+  // 監聽選單點擊
+  if (contextMenusApi && contextMenusApi.onClicked && typeof contextMenusApi.onClicked.addListener === 'function') {
+    contextMenusApi.onClicked.addListener(async (info, tab) => {
+      if (!store.isLoaded) {
+        await store.load();
+      }
+      const engine = store.getEngineById(info.menuItemId);
+      if (engine && info.selectionText) {
+        performSearch(info.selectionText, engine, tab, store, navigationAdapter);
+      }
+    });
+  }
+
+  // Store 變更時自動同步右鍵選單
+  store.subscribe(() => {
+    rebuildContextMenus(store, contextMenusApi);
+  });
+
+  // 初始載入
+  await store.load();
+  rebuildContextMenus(store, contextMenusApi);
+}

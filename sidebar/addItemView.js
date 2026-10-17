@@ -1,6 +1,7 @@
 // addItemView.js - 負責新增與編輯項目的表單邏輯
 import { collectionStore } from './store.js';
 import { tabAdapter } from '../tabAdapter.js';
+import { parseActorInput, renderActorChips } from './chipHelper.js';
 
 // --- DOM Elements ---
 let itemTitleInput, itemUrlInput, itemImageUrlInput;
@@ -136,7 +137,7 @@ export function showAddItemView(itemId = null) {
       if (!currentTab) {
         populateTagSelector([]);
         currentEditingActors = [];
-        renderActorChips();
+        renderActorChipsView();
         updateImagePreview('');
         return;
       }
@@ -158,7 +159,7 @@ export function showAddItemView(itemId = null) {
         currentEditingActors = [];
       }
 
-      renderActorChips();
+      renderActorChipsView();
 
       if (currentTab.url && (!existingItem || !existingItem.imageUrl)) {
         tryFetchImage(currentTab.url, false);
@@ -166,14 +167,7 @@ export function showAddItemView(itemId = null) {
     });
   }
 
-  renderActorChips();
-}
-
-/**
- * 回傳當前是否為編輯模式 (用於 Controller 判斷返回路徑)
- */
-export function isEditingMode() {
-  return editingItemId !== null;
+  renderActorChipsView();
 }
 
 // --- Internal Logic ---
@@ -296,39 +290,25 @@ async function handleDelete() {
 function handleAddActor() {
   const val = itemActorInput ? itemActorInput.value.trim() : '';
   if (val) {
-    const names = val.split(',').map(s => s.trim()).filter(Boolean);
+    const names = parseActorInput(val);
     names.forEach(name => {
       if (!currentEditingActors.includes(name)) {
         currentEditingActors.push(name);
       }
     });
     itemActorInput.value = '';
-    renderActorChips();
+    renderActorChipsView();
   }
 }
 
-function renderActorChips() {
-  if (!selectedActorsContainer) return;
-  selectedActorsContainer.innerHTML = '';
-  currentEditingActors.forEach(actor => {
-    const chip = document.createElement('span');
-    chip.className = 'actor-chip';
-
-    const nameSpan = document.createElement('span');
-    nameSpan.innerText = actor;
-
-    const removeBtn = document.createElement('span');
-    removeBtn.className = 'remove-actor';
-    removeBtn.innerText = '×';
-    removeBtn.title = 'Remove actor';
-    removeBtn.addEventListener('click', () => {
+function renderActorChipsView() {
+  renderActorChips(selectedActorsContainer, currentEditingActors, {
+    removeButtonClass: 'remove-actor',
+    removeTitle: 'Remove actor',
+    onRemove: (actor) => {
       currentEditingActors = currentEditingActors.filter(a => a !== actor);
-      renderActorChips();
-    });
-
-    chip.appendChild(nameSpan);
-    chip.appendChild(removeBtn);
-    selectedActorsContainer.appendChild(chip);
+      renderActorChipsView();
+    }
   });
 }
 

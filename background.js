@@ -1,4 +1,4 @@
-import { initializeSearchShortcuts } from './utils.js';
+import { initializeSearchShortcuts } from './searchEngineStore.js';
 import { collectionStore, ChromeStorageAdapter } from './sidebar/store.js';
 import { searchEngineStore } from './searchEngineStore.js';
 import { GoogleDriveAdapter } from './sidebar/googleDriveAdapter.js';
