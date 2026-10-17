@@ -1,6 +1,7 @@
 // addItemView.js - 負責新增與編輯項目的表單邏輯
 import { collectionStore } from './store.js';
 import { tabAdapter } from '../tabAdapter.js';
+import { captureTabMetadata } from '../pageCapture.js';
 
 // --- DOM Elements ---
 let itemTitleInput, itemUrlInput, itemImageUrlInput;
@@ -131,9 +132,10 @@ export function showAddItemView(itemId = null) {
     editingItemId = null;
     if (deleteItemButton) deleteItemButton.style.display = 'none';
 
-    // 從當前分頁抓取資訊
-    tabAdapter.getActiveTab().then(currentTab => {
-      if (!currentTab) {
+    // 從當前分頁抓取資訊 (使用 captureTabMetadata 深層介面)
+    tabAdapter.getActiveTab().then(async currentTab => {
+      const metadata = await captureTabMetadata(currentTab, { store: collectionStore });
+      if (!metadata || !metadata.valid) {
         populateTagSelector([]);
         currentEditingActors = [];
         renderActorChips();
@@ -141,27 +143,17 @@ export function showAddItemView(itemId = null) {
         return;
       }
 
-      if (itemTitleInput) itemTitleInput.value = currentTab.title || '';
-      if (itemUrlInput) itemUrlInput.value = currentTab.url || '';
-
-      // 檢查是否已存在
-      const existingItem = currentTab.url ? collectionStore.getItemByUrl(currentTab.url) : null;
-      if (existingItem) {
-        populateTagSelector(existingItem.tags || []);
-        if (itemImageUrlInput) itemImageUrlInput.value = existingItem.imageUrl || '';
-        currentEditingActors = existingItem.actors ? [...existingItem.actors] : [];
-        if (existingItem.imageUrl) {
-          updateImagePreview(existingItem.imageUrl);
-        }
-      } else {
-        populateTagSelector([]);
-        currentEditingActors = [];
-      }
-
+      if (itemTitleInput) itemTitleInput.value = metadata.title || '';
+      if (itemUrlInput) itemUrlInput.value = metadata.url || '';
+      if (itemImageUrlInput) itemImageUrlInput.value = metadata.imageUrl || '';
+      currentEditingActors = [...metadata.actors];
+      populateTagSelector(metadata.tags);
       renderActorChips();
 
-      if (currentTab.url && (!existingItem || !existingItem.imageUrl)) {
-        tryFetchImage(currentTab.url, false);
+      if (metadata.imageUrl) {
+        updateImagePreview(metadata.imageUrl);
+      } else if (metadata.url) {
+        tryFetchImage(metadata.url, false);
       }
     });
   }

@@ -8,7 +8,11 @@ describe('BrowserTabAdapter (Deep Module & Seam)', () => {
 
   beforeEach(() => {
     memoryAdapter = new MemoryTabAdapter({
-      activeTab: { id: 101, index: 3, title: 'Active Tab', url: 'https://active.com' }
+      activeTab: { id: 101, index: 3, title: 'Active Tab', url: 'https://active.com' },
+      tabs: [
+        { id: 101, index: 3, title: 'Active Tab', url: 'https://active.com', active: true },
+        { id: 102, index: 4, title: 'Second Tab', url: 'https://second.com', active: false }
+      ]
     });
     tabAdapter = new BrowserTabAdapter(memoryAdapter);
   });
@@ -29,6 +33,59 @@ describe('BrowserTabAdapter (Deep Module & Seam)', () => {
 
       const activeTab = await emptyTabAdapter.getActiveTab();
       assert.strictEqual(activeTab, null);
+    });
+  });
+
+  describe('findTabs & findTabByUrl', () => {
+    it('finds tabs by query criteria in MemoryTabAdapter', async () => {
+      const allTabs = await tabAdapter.findTabs();
+      assert.strictEqual(allTabs.length, 2);
+
+      const activeTabs = await tabAdapter.findTabs({ active: true });
+      assert.strictEqual(activeTabs.length, 1);
+      assert.strictEqual(activeTabs[0].id, 101);
+
+      const matchedTab = await tabAdapter.findTabByUrl('https://second.com');
+      assert.ok(matchedTab);
+      assert.strictEqual(matchedTab.id, 102);
+
+      const nonExistent = await tabAdapter.findTabByUrl('https://unknown.com');
+      assert.strictEqual(nonExistent, null);
+    });
+  });
+
+  describe('executeScript', () => {
+    it('executes script or returns tab dom result in MemoryTabAdapter', async () => {
+      memoryAdapter.tabDomMap.set(101, 'https://active.com/image.jpg');
+
+      const results = await tabAdapter.executeScript({
+        target: { tabId: 101 },
+        func: () => 'fallback'
+      });
+
+      assert.ok(results);
+      assert.strictEqual(results[0].result, 'https://active.com/image.jpg');
+    });
+
+    it('returns null when no executor or DOM data is configured', async () => {
+      const results = await tabAdapter.executeScript({
+        target: { tabId: 999 },
+        func: () => null
+      });
+
+      assert.strictEqual(results, null);
+    });
+  });
+
+  describe('showSaveFeedback', () => {
+    it('records feedback in MemoryTabAdapter', async () => {
+      const tab = { id: 101 };
+      const success = await tabAdapter.showSaveFeedback(tab, { isExisting: true, title: 'Item 1' });
+
+      assert.strictEqual(success, true);
+      assert.strictEqual(memoryAdapter.feedbackRecords.length, 1);
+      assert.strictEqual(memoryAdapter.feedbackRecords[0].tab.id, 101);
+      assert.strictEqual(memoryAdapter.feedbackRecords[0].options.isExisting, true);
     });
   });
 
