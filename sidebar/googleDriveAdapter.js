@@ -1,5 +1,5 @@
 // googleDriveAdapter.js - Google Drive REST API v3 專用適配模組 (Deep Module)
-// 封裝 OAuth2 授權、應用程式隱藏資料夾 (appDataFolder) 檔案讀取、上傳、元資料查詢與刪除
+// 封裝 OAuth2 授權、自動靜默續期、應用程式隱藏資料夾 (appDataFolder) 檔案讀取、上傳、元資料查詢與刪除
 
 const GDRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
 const GDRIVE_UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3';
@@ -13,6 +13,11 @@ export class MemoryGoogleDriveAdapter {
   constructor(initialFiles = {}) {
     this.token = null;
     this.userInfo = null;
+    this.autoConnect = false;
+    this.tokenExpired = false;
+    this.silentAuthShouldFail = false;
+    this.interactiveAuthShouldFail = false;
+    this.authCalls = [];
     // Map of filename -> { id, name, content, modifiedTime, parents }
     this.files = new Map();
     for (const [name, content] of Object.entries(initialFiles)) {
@@ -27,13 +32,64 @@ export class MemoryGoogleDriveAdapter {
     }
   }
 
-  setMockAuth({ token = 'mock_token_123', email = 'test@example.com' } = {}) {
+  setMockAuth({ token = 'mock_token_123', email = 'test@example.com', autoConnect = true } = {}) {
     this.token = token;
     this.userInfo = { email };
+    this.autoConnect = autoConnect;
+    this.tokenExpired = false;
+  }
+
+  expireToken() {
+    this.token = null;
+    this.tokenExpired = true;
+  }
+
+  async canAutoConnect() {
+    return Boolean(this.autoConnect || this.token);
   }
 
   async isAuthenticated() {
-    return !!this.token;
+    return !!this.token && !this.tokenExpired;
+  }
+
+  async authorize(interactive = true) {
+    this.authCalls.push({ interactive });
+    if (!interactive && this.silentAuthShouldFail) {
+      throw new Error('Silent authentication failed (interaction_required)');
+    }
+    if (interactive && this.interactiveAuthShouldFail) {
+      throw new Error('Interactive authentication was cancelled or failed');
+    }
+    this.token = interactive ? 'mock_interactive_token' : 'mock_silent_token';
+    this.tokenExpired = false;
+    this.autoConnect = true;
+    if (!this.userInfo) {
+      this.userInfo = { email: 'test@example.com' };
+    }
+    return { token: this.token, user: this.userInfo };
+  }
+
+  async ensureAuthenticated({ allowInteractiveFallback = true } = {}) {
+    if (this.token && !this.tokenExpired) {
+      return true;
+    }
+    if (!this.autoConnect) {
+      return false;
+    }
+    try {
+      await this.authorize(false);
+      return true;
+    } catch {
+      if (allowInteractiveFallback) {
+        try {
+          await this.authorize(true);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+      return false;
+    }
   }
 
   async getUserInfo() {
@@ -44,10 +100,21 @@ export class MemoryGoogleDriveAdapter {
   async disconnect() {
     this.token = null;
     this.userInfo = null;
+    this.autoConnect = false;
+    this.tokenExpired = false;
+  }
+
+  async _ensureTokenOrThrow(allowInteractiveFallback = true) {
+    if (!this.token || this.tokenExpired) {
+      const ok = await this.ensureAuthenticated({ allowInteractiveFallback });
+      if (!ok || !this.token) {
+        throw new Error('Not authenticated');
+      }
+    }
   }
 
   async findFile(filename = DEFAULT_SYNC_FILENAME) {
-    if (!this.token) throw new Error('Not authenticated');
+    await this._ensureTokenOrThrow();
     const file = this.files.get(filename);
     if (!file) return null;
     return {
@@ -58,7 +125,7 @@ export class MemoryGoogleDriveAdapter {
   }
 
   async downloadJson(fileId) {
-    if (!this.token) throw new Error('Not authenticated');
+    await this._ensureTokenOrThrow();
     for (const file of this.files.values()) {
       if (file.id === fileId) {
         return JSON.parse(file.content);
@@ -68,7 +135,7 @@ export class MemoryGoogleDriveAdapter {
   }
 
   async uploadJson(data, filename = DEFAULT_SYNC_FILENAME) {
-    if (!this.token) throw new Error('Not authenticated');
+    await this._ensureTokenOrThrow();
     const jsonString = JSON.stringify(data, null, 2);
     const existing = this.files.get(filename);
     const now = new Date().toISOString();
@@ -87,7 +154,7 @@ export class MemoryGoogleDriveAdapter {
 }
 
 /**
- * 真實環境 Google Drive 適配器 (使用標準 fetch + chrome.identity.launchWebAuthFlow / PKCE)
+ * 真實環境 Google Drive 適配器 (使用標準 fetch + chrome.identity.launchWebAuthFlow)
  */
 export class GoogleDriveAdapter {
   /**
@@ -102,6 +169,29 @@ export class GoogleDriveAdapter {
     this.identity = identity || (typeof chrome !== 'undefined' ? chrome.identity : null);
     this.cachedToken = null;
     this.cachedUser = null;
+    this.autoConnect = false;
+    this.tokenExpiry = null;
+    this._authPromise = null;
+
+    if (this.storage && typeof this.storage.onChanged === 'function') {
+      this.unsubscribeStorage = this.storage.onChanged((changes) => {
+        if (changes.gdrive_client_id !== undefined) {
+          this.clientId = changes.gdrive_client_id.newValue || '';
+        }
+        if (changes.gdrive_token !== undefined) {
+          this.cachedToken = changes.gdrive_token.newValue || null;
+        }
+        if (changes.gdrive_user !== undefined) {
+          this.cachedUser = changes.gdrive_user.newValue || null;
+        }
+        if (changes.gdrive_auto_connect !== undefined) {
+          this.autoConnect = !!changes.gdrive_auto_connect.newValue;
+        }
+        if (changes.gdrive_token_expiry !== undefined) {
+          this.tokenExpiry = changes.gdrive_token_expiry.newValue || null;
+        }
+      });
+    }
   }
 
   setClientId(clientId) {
@@ -113,18 +203,31 @@ export class GoogleDriveAdapter {
   }
 
   /**
-   * 載入儲存的 Token 與 ClientId
+   * 載入儲存的 Token、ClientId 與自動登入設定
    */
   async loadConfig() {
     if (this.storage) {
-      const data = await this.storage.get(['gdrive_client_id', 'gdrive_token', 'gdrive_user']);
-      if (data.gdrive_client_id) this.clientId = data.gdrive_client_id;
-      if (data.gdrive_token) this.cachedToken = data.gdrive_token;
-      if (data.gdrive_user) this.cachedUser = data.gdrive_user;
+      const data = await this.storage.get([
+        'gdrive_client_id',
+        'gdrive_token',
+        'gdrive_user',
+        'gdrive_auto_connect',
+        'gdrive_token_expiry'
+      ]);
+      if (data.gdrive_client_id !== undefined) this.clientId = data.gdrive_client_id || '';
+      if (data.gdrive_token !== undefined) this.cachedToken = data.gdrive_token || null;
+      if (data.gdrive_user !== undefined) this.cachedUser = data.gdrive_user || null;
+      if (data.gdrive_token_expiry !== undefined) this.tokenExpiry = data.gdrive_token_expiry || null;
+      if (data.gdrive_auto_connect !== undefined) {
+        this.autoConnect = !!data.gdrive_auto_connect;
+      } else if (data.gdrive_token || data.gdrive_user) {
+        this.autoConnect = true;
+      }
     }
     return {
       clientId: this.clientId,
-      isAuthenticated: !!this.cachedToken,
+      isAuthenticated: !!this.cachedToken && !this.isTokenExpired(),
+      autoConnect: this.autoConnect,
       user: this.cachedUser
     };
   }
@@ -134,6 +237,22 @@ export class GoogleDriveAdapter {
     if (this.storage) {
       await this.storage.set({ gdrive_client_id: this.clientId });
     }
+  }
+
+  /**
+   * 檢查 Token 是否已過期
+   */
+  isTokenExpired() {
+    if (!this.tokenExpiry) return false;
+    return Date.now() >= Number(this.tokenExpiry);
+  }
+
+  /**
+   * 檢查是否具備自動登入條件 (已設定 Client ID 且曾授權連結過)
+   */
+  async canAutoConnect() {
+    await this.loadConfig();
+    return Boolean(this.clientId && (this.autoConnect || this.cachedToken));
   }
 
   /**
@@ -153,14 +272,17 @@ export class GoogleDriveAdapter {
     if (!this.cachedToken) {
       await this.loadConfig();
     }
-    return !!this.cachedToken;
+    return !!this.cachedToken && !this.isTokenExpired();
   }
 
   /**
-   * 執行 OAuth 登入流程 (Implicit Flow 快速免後端模式)
-   * 彈出 Google 帳號授權視窗，支援在任意設備登入 Google 帳號
+   * 執行 OAuth 登入流程 (Implicit Flow 免後端模式)
+   * interactive = true 時彈出帳號選擇視窗；interactive = false 時使用 prompt=none 背景靜默續期
    */
   async authorize(interactive = true) {
+    if (!this.clientId) {
+      await this.loadConfig();
+    }
     if (!this.clientId) {
       throw new Error('Google OAuth Client ID is required.');
     }
@@ -174,7 +296,15 @@ export class GoogleDriveAdapter {
     authUrl.searchParams.set('response_type', 'token');
     authUrl.searchParams.set('redirect_uri', redirectUri);
     authUrl.searchParams.set('scope', `${GDRIVE_APP_DATA_SCOPE} https://www.googleapis.com/auth/userinfo.email`);
-    authUrl.searchParams.set('prompt', 'select_account');
+
+    if (interactive) {
+      authUrl.searchParams.set('prompt', 'select_account');
+    } else {
+      authUrl.searchParams.set('prompt', 'none');
+      if (this.cachedUser && this.cachedUser.email && this.cachedUser.email !== 'Connected') {
+        authUrl.searchParams.set('login_hint', this.cachedUser.email);
+      }
+    }
 
     return new Promise((resolve, reject) => {
       this.identity.launchWebAuthFlow(
@@ -183,7 +313,7 @@ export class GoogleDriveAdapter {
           interactive
         },
         async (responseUrl) => {
-          if (chrome.runtime && chrome.runtime.lastError) {
+          if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.lastError) {
             return reject(new Error(chrome.runtime.lastError.message));
           }
           if (!responseUrl) {
@@ -195,6 +325,7 @@ export class GoogleDriveAdapter {
             const urlObj = new URL(responseUrl);
             const params = new URLSearchParams(urlObj.hash.startsWith('#') ? urlObj.hash.slice(1) : urlObj.hash);
             const token = params.get('access_token');
+            const expiresIn = params.get('expires_in');
             const error = params.get('error');
 
             if (error) {
@@ -205,25 +336,78 @@ export class GoogleDriveAdapter {
             }
 
             this.cachedToken = token;
+            this.autoConnect = true;
+            this.tokenExpiry = expiresIn
+              ? Date.now() + Math.max(0, Number(expiresIn) - 60) * 1000
+              : null;
 
             // 取得使用者資訊
             const user = await this.fetchUserInfo(token);
-            this.cachedUser = user;
+            if (user && user.email === 'Connected' && this.cachedUser && this.cachedUser.email) {
+              // 保留既有 email
+            } else {
+              this.cachedUser = user;
+            }
 
             if (this.storage) {
               await this.storage.set({
                 gdrive_token: token,
-                gdrive_user: user
+                gdrive_user: this.cachedUser,
+                gdrive_auto_connect: true,
+                gdrive_token_expiry: this.tokenExpiry
               });
             }
 
-            resolve({ token, user });
+            resolve({ token, user: this.cachedUser });
           } catch (err) {
             reject(err);
           }
         }
       );
     });
+  }
+
+  /**
+   * 確保目前已具備有效授權：
+   * 1. 若有未過期 Token 直接返回 true
+   * 2. 若已綁定過帳號 (autoConnect) 先嘗試背景靜默續期 (interactive: false)
+   * 3. 若靜默續期失敗且 allowInteractiveFallback 為 true，則自動彈出登入視窗 (interactive: true)
+   */
+  async ensureAuthenticated({ allowInteractiveFallback = true } = {}) {
+    await this.loadConfig();
+
+    if (this.cachedToken && !this.isTokenExpired()) {
+      return true;
+    }
+
+    if (!this.clientId || (!this.autoConnect && !this.cachedToken)) {
+      return false;
+    }
+
+    if (this._authPromise) {
+      return this._authPromise;
+    }
+
+    this._authPromise = (async () => {
+      try {
+        await this.authorize(false);
+        return true;
+      } catch (silentErr) {
+        if (allowInteractiveFallback) {
+          try {
+            await this.authorize(true);
+            return true;
+          } catch (interactiveErr) {
+            return false;
+          }
+        }
+        return false;
+      } finally {
+        this._authPromise = null;
+      }
+    })();
+
+    return this._authPromise;
   }
 
   async fetchUserInfo(token) {
@@ -236,7 +420,7 @@ export class GoogleDriveAdapter {
         return { email: info.email, id: info.id };
       }
     } catch {
-      // 容錯，若無法取得則回傳空物件
+      // 容錯，若無法取得則回傳預設物件
     }
     return { email: 'Connected' };
   }
@@ -248,18 +432,73 @@ export class GoogleDriveAdapter {
     return this.cachedUser;
   }
 
+  async _clearExpiredToken() {
+    this.cachedToken = null;
+    this.tokenExpiry = null;
+    if (this.storage) {
+      await this.storage.set({
+        gdrive_token: null,
+        gdrive_token_expiry: null
+      });
+    }
+  }
+
   /**
-   * 登出與斷開連線
+   * 登出與斷開連線 (主動登出時會關閉 autoConnect)
    */
   async disconnect() {
     this.cachedToken = null;
     this.cachedUser = null;
+    this.autoConnect = false;
+    this.tokenExpiry = null;
     if (this.storage) {
       await this.storage.set({
         gdrive_token: null,
-        gdrive_user: null
+        gdrive_user: null,
+        gdrive_auto_connect: false,
+        gdrive_token_expiry: null
       });
     }
+  }
+
+  /**
+   * 封裝具備 401 自動重新驗證與重試的 Fetch
+   */
+  async _fetchWithAuth(url, options = {}, { allowInteractiveFallback = true } = {}) {
+    if (!this.cachedToken || this.isTokenExpired()) {
+      await this.ensureAuthenticated({ allowInteractiveFallback });
+    }
+    if (!this.cachedToken) {
+      throw new Error('Not authenticated with Google Drive.');
+    }
+
+    const executeRequest = () =>
+      fetch(url, {
+        ...options,
+        headers: {
+          ...(options.headers || {}),
+          Authorization: `Bearer ${this.cachedToken}`
+        }
+      });
+
+    let res = await executeRequest();
+
+    if (res.status === 401) {
+      await this._clearExpiredToken();
+      if (this.clientId && this.autoConnect) {
+        const refreshed = await this.ensureAuthenticated({ allowInteractiveFallback });
+        if (refreshed && this.cachedToken) {
+          res = await executeRequest();
+        }
+      }
+    }
+
+    if (res.status === 401) {
+      await this._clearExpiredToken();
+      throw new Error('Google Drive authorization expired. Please log in again.');
+    }
+
+    return res;
   }
 
   /**
@@ -268,23 +507,10 @@ export class GoogleDriveAdapter {
    * @returns {Promise<{ id: string, name: string, modifiedTime: string }|null>}
    */
   async findFile(filename = DEFAULT_SYNC_FILENAME) {
-    if (!this.cachedToken) await this.loadConfig();
-    if (!this.cachedToken) throw new Error('Not authenticated with Google Drive.');
-
     const q = `name = '${filename}' and 'appDataFolder' in parents and trashed = false`;
     const url = `${GDRIVE_API_BASE}/files?spaces=appDataFolder&q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)`;
 
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${this.cachedToken}`
-      }
-    });
-
-    if (res.status === 401) {
-      // Token 過期
-      await this.disconnect();
-      throw new Error('Google Drive authorization expired. Please log in again.');
-    }
+    const res = await this._fetchWithAuth(url);
 
     if (!res.ok) {
       const errText = await res.text();
@@ -304,20 +530,8 @@ export class GoogleDriveAdapter {
    * @returns {Promise<any>}
    */
   async downloadJson(fileId) {
-    if (!this.cachedToken) await this.loadConfig();
-    if (!this.cachedToken) throw new Error('Not authenticated with Google Drive.');
-
     const url = `${GDRIVE_API_BASE}/files/${encodeURIComponent(fileId)}?alt=media`;
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${this.cachedToken}`
-      }
-    });
-
-    if (res.status === 401) {
-      await this.disconnect();
-      throw new Error('Google Drive authorization expired. Please log in again.');
-    }
+    const res = await this._fetchWithAuth(url);
 
     if (!res.ok) {
       throw new Error(`Failed to download file from Google Drive (${res.status})`);
@@ -333,19 +547,15 @@ export class GoogleDriveAdapter {
    * @returns {Promise<{ id: string, name: string, modifiedTime: string }>}
    */
   async uploadJson(data, filename = DEFAULT_SYNC_FILENAME) {
-    if (!this.cachedToken) await this.loadConfig();
-    if (!this.cachedToken) throw new Error('Not authenticated with Google Drive.');
-
     const existingFile = await this.findFile(filename);
     const jsonContent = JSON.stringify(data, null, 2);
 
     if (existingFile && existingFile.id) {
       // 檔案已存在：使用 PATCH /upload/drive/v3/files/{fileId}?uploadType=media 更新內容
       const updateUrl = `${GDRIVE_UPLOAD_BASE}/files/${encodeURIComponent(existingFile.id)}?uploadType=media&fields=id,name,modifiedTime`;
-      const res = await fetch(updateUrl, {
+      const res = await this._fetchWithAuth(updateUrl, {
         method: 'PATCH',
         headers: {
-          Authorization: `Bearer ${this.cachedToken}`,
           'Content-Type': 'application/json; charset=UTF-8'
         },
         body: jsonContent
@@ -377,10 +587,9 @@ export class GoogleDriveAdapter {
         closeDelim;
 
       const uploadUrl = `${GDRIVE_UPLOAD_BASE}/files?uploadType=multipart&fields=id,name,modifiedTime`;
-      const res = await fetch(uploadUrl, {
+      const res = await this._fetchWithAuth(uploadUrl, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${this.cachedToken}`,
           'Content-Type': `multipart/related; boundary=${boundary}`
         },
         body: multipartBody

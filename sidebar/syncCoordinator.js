@@ -1,5 +1,5 @@
 // syncCoordinator.js - 雲端多裝置同步協調器 (Cloud Sync Coordinator)
-// 封裝雙向與三向智慧合併 (Smart 3-Way Merge)、基準快照 (Base Snapshot)、版本比對與快照還原邏輯
+// 封裝雙向與三向智慧合併 (Smart 3-Way Merge)、基準快照 (Base Snapshot)、防抖自動保存 (Debounced Auto-Sync)、關閉立即 Flush 與自動登入
 
 import { validateBackupPayload, createUnifiedBackup, restoreUnifiedBackup } from './backupCoordinator.js';
 
@@ -53,6 +53,55 @@ function isEngineModified(eng, baseEng) {
   const baseTime = Number(baseEng.updatedAt || 0);
   if (engTime > baseTime) return true;
   return !isEngineContentEqual(eng, baseEng);
+}
+
+/**
+ * 比對兩份統一備份資料內容是否完全一致 (用於判斷是否有未同步變更)
+ */
+export function isUnifiedDataEqual(dataA, dataB) {
+  if (!dataA || !dataB) return dataA === dataB;
+
+  const itemsA = Array.isArray(dataA.items) ? dataA.items : [];
+  const itemsB = Array.isArray(dataB.items) ? dataB.items : [];
+  if (itemsA.length !== itemsB.length) return false;
+
+  const tagsA = Array.isArray(dataA.tags) ? dataA.tags : [];
+  const tagsB = Array.isArray(dataB.tags) ? dataB.tags : [];
+  if (tagsA.length !== tagsB.length || !tagsA.every((t, i) => t === tagsB[i])) return false;
+
+  const enginesA = Array.isArray(dataA.searchEngines) ? dataA.searchEngines : [];
+  const enginesB = Array.isArray(dataB.searchEngines) ? dataB.searchEngines : [];
+  if (enginesA.length !== enginesB.length) return false;
+
+  const mapBItems = new Map();
+  for (const item of itemsB) {
+    if (item && (item.id || item.url)) {
+      mapBItems.set(item.id || item.url, item);
+    }
+  }
+  for (const itemA of itemsA) {
+    const key = itemA && (itemA.id || itemA.url);
+    const itemB = mapBItems.get(key);
+    if (!itemB || isItemModified(itemA, itemB) || !isItemContentEqual(itemA, itemB)) {
+      return false;
+    }
+  }
+
+  const mapBEngines = new Map();
+  for (const eng of enginesB) {
+    if (eng && (eng.id || eng.urlTemplate)) {
+      mapBEngines.set(eng.id || eng.urlTemplate, eng);
+    }
+  }
+  for (const engA of enginesA) {
+    const key = engA && (engA.id || engA.urlTemplate);
+    const engB = mapBEngines.get(key);
+    if (!engB || isEngineModified(engA, engB) || !isEngineContentEqual(engA, engB)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /**
@@ -390,7 +439,7 @@ export function threeWayMergeUnifiedData(localData, cloudData, baseData) {
 
 /**
  * 智慧合併統一入口
- * 若有提供 baseData 則採用 Smart 3-Way Merge，無則退回 2-Way Merge
+ * 若有提供 baseData 則採用 Smart 3-Way Merge，否則退回 2-Way Merge
  * @param {Object} localData - 本機備份物件 { items, tags, searchEngines }
  * @param {Object} cloudData - 雲端備份物件 { items, tags, searchEngines }
  * @param {Object} [baseData=null] - 上次同步基準快照
@@ -412,17 +461,54 @@ export class SyncCoordinator {
    * @param {Object} options.cloudAdapter - 雲端適配器 (實作 findFile, downloadJson, uploadJson, isAuthenticated)
    * @param {Object} options.collectionStore - CollectionStore 實例
    * @param {Object} options.searchEngineStore - SearchEngineStore 實例
-   * @param {Object} [options.storage] - 本地儲存 (記錄 last_sync_time, last_sync_base 等)
+   * @param {Object} [options.storage] - 本地儲存 (記錄 last_sync_time, last_sync_base, sync_dirty 等)
+   * @param {number} [options.autoSyncDebounceMs=3000] - 自動防抖同步延遲毫秒數
    */
-  constructor({ cloudAdapter, collectionStore, searchEngineStore, storage = null } = {}) {
+  constructor({
+    cloudAdapter,
+    collectionStore,
+    searchEngineStore,
+    storage = null,
+    autoSyncDebounceMs = 3000
+  } = {}) {
     this.cloudAdapter = cloudAdapter;
     this.collectionStore = collectionStore;
     this.searchEngineStore = searchEngineStore;
     this.storage = storage;
+    this.autoSyncDebounceMs = autoSyncDebounceMs;
     this.status = SYNC_STATUS.IDLE;
     this.lastSyncTime = null;
     this.baseData = null;
+    this.isDirty = false;
+    this.isApplyingRemoteSync = false;
+    this._syncPromise = null;
+    this._pendingSyncAfterCurrent = false;
+    this._pendingSyncOptions = null;
+    this._autoSyncTimer = null;
+    this._unsubscribeStores = [];
     this.listeners = [];
+
+    if (this.storage && typeof this.storage.onChanged === 'function') {
+      this._unsubscribeStorage = this.storage.onChanged((changes) => {
+        if (changes.last_sync_time && changes.last_sync_time.newValue) {
+          this.lastSyncTime = changes.last_sync_time.newValue;
+        }
+        if (changes.last_sync_base !== undefined) {
+          this.baseData = changes.last_sync_base.newValue || null;
+        }
+        if (changes.sync_dirty !== undefined) {
+          this.isDirty = !!changes.sync_dirty.newValue;
+        }
+        if (changes.last_sync_status && changes.last_sync_status.newValue) {
+          const { status, detail, lastSyncTime } = changes.last_sync_status.newValue;
+          if (lastSyncTime) this.lastSyncTime = lastSyncTime;
+          if (status && status !== this.status) {
+            this.status = status;
+            this.listeners.forEach(cb => cb({ status, detail, lastSyncTime: this.lastSyncTime }));
+          }
+        }
+      });
+    }
   }
 
   onStatusChange(callback) {
@@ -435,18 +521,174 @@ export class SyncCoordinator {
   _setStatus(status, detail = null) {
     this.status = status;
     this.listeners.forEach(cb => cb({ status, detail, lastSyncTime: this.lastSyncTime }));
+    if (this.storage) {
+      this.storage.set({
+        last_sync_status: {
+          status,
+          detail,
+          lastSyncTime: this.lastSyncTime,
+          updatedAt: Date.now()
+        }
+      }).catch(() => {});
+    }
   }
 
   async init() {
     if (this.storage) {
-      const data = await this.storage.get(['last_sync_time', 'last_sync_base']);
+      const data = await this.storage.get(['last_sync_time', 'last_sync_base', 'sync_dirty']);
       if (data.last_sync_time) {
         this.lastSyncTime = data.last_sync_time;
       }
       if (data.last_sync_base) {
         this.baseData = data.last_sync_base;
       }
+      if (data.sync_dirty !== undefined) {
+        this.isDirty = !!data.sync_dirty;
+      }
     }
+  }
+
+  /**
+   * 啟用資料異動監聽自動同步 (當 CollectionStore 或 SearchEngineStore 發生本地修改時自動排程同步)
+   */
+  enableAutoSync({ debounceMs = this.autoSyncDebounceMs } = {}) {
+    this.disableAutoSync();
+
+    const handleStoreMutation = (event) => {
+      if (this.isApplyingRemoteSync) return;
+      if (event && event.type === 'sync' && event.source === 'external') return;
+      this.scheduleAutoSync(debounceMs);
+    };
+
+    if (this.collectionStore && typeof this.collectionStore.subscribe === 'function') {
+      this._unsubscribeStores.push(this.collectionStore.subscribe(handleStoreMutation));
+    }
+    if (this.searchEngineStore && typeof this.searchEngineStore.subscribe === 'function') {
+      this._unsubscribeStores.push(this.searchEngineStore.subscribe(handleStoreMutation));
+    }
+
+    return () => this.disableAutoSync();
+  }
+
+  disableAutoSync() {
+    if (this._autoSyncTimer) {
+      clearTimeout(this._autoSyncTimer);
+      this._autoSyncTimer = null;
+    }
+    this._unsubscribeStores.forEach(unsub => {
+      if (typeof unsub === 'function') unsub();
+    });
+    this._unsubscribeStores = [];
+  }
+
+  /**
+   * 標記本地有未同步至雲端的變更
+   */
+  async markDirty() {
+    this.isDirty = true;
+    if (this.storage) {
+      await this.storage.set({ sync_dirty: true });
+    }
+  }
+
+  /**
+   * 檢查目前本地資料是否與基準快照 (baseData) 有差異或標記為 dirty
+   */
+  async hasUnsyncedChanges() {
+    if (this.isDirty) return true;
+    const localData = await createUnifiedBackup(this.collectionStore, this.searchEngineStore);
+    if (!this.baseData) {
+      return (
+        localData.items.length > 0 ||
+        localData.tags.length > 0 ||
+        localData.searchEngines.length > 0
+      );
+    }
+    return !isUnifiedDataEqual(localData, this.baseData);
+  }
+
+  /**
+   * 防抖排程自動同步
+   */
+  scheduleAutoSync(delayMs = this.autoSyncDebounceMs, options = {}) {
+    if (this.isApplyingRemoteSync) return;
+    this.markDirty().catch(() => {});
+
+    if (this._autoSyncTimer) {
+      clearTimeout(this._autoSyncTimer);
+    }
+
+    this._autoSyncTimer = setTimeout(async () => {
+      this._autoSyncTimer = null;
+      const canSync = await this._canPerformAutoSync();
+      if (canSync) {
+        await this.sync(options);
+      }
+    }, delayMs);
+  }
+
+  async _canPerformAutoSync() {
+    if (!this.cloudAdapter) return false;
+    if (typeof this.cloudAdapter.canAutoConnect === 'function') {
+      return await this.cloudAdapter.canAutoConnect();
+    }
+    if (typeof this.cloudAdapter.isAuthenticated === 'function') {
+      return await this.cloudAdapter.isAuthenticated();
+    }
+    return false;
+  }
+
+  /**
+   * 關閉 Extension 或瀏覽器時立即 Flush 保存未同步變更
+   */
+  async flushPendingSync(options = {}) {
+    const hadPendingTimer = !!this._autoSyncTimer;
+    if (this._autoSyncTimer) {
+      clearTimeout(this._autoSyncTimer);
+      this._autoSyncTimer = null;
+    }
+
+    const canSync = await this._canPerformAutoSync();
+    if (!canSync) {
+      return { success: false, skipped: true, reason: 'not_connected' };
+    }
+
+    const shouldSync =
+      hadPendingTimer ||
+      this.isDirty ||
+      !!options.force ||
+      (await this.hasUnsyncedChanges());
+
+    if (!shouldSync) {
+      return { success: true, skipped: true, reason: 'already_in_sync' };
+    }
+
+    return await this.sync(options);
+  }
+
+  /**
+   * 開啟瀏覽器或開啟 Extension 時自動登入並執行 3-Way Sync
+   */
+  async autoLoginAndSync({ allowInteractiveFallback = true } = {}) {
+    const canSync = await this._canPerformAutoSync();
+    if (!canSync) {
+      return { success: false, skipped: true, reason: 'not_connected' };
+    }
+
+    let isAuth = false;
+    if (typeof this.cloudAdapter.ensureAuthenticated === 'function') {
+      isAuth = await this.cloudAdapter.ensureAuthenticated({ allowInteractiveFallback });
+    } else if (typeof this.cloudAdapter.isAuthenticated === 'function') {
+      isAuth = await this.cloudAdapter.isAuthenticated();
+    }
+
+    if (!isAuth) {
+      const errorMsg = 'Cloud auto-login failed or requires authorization.';
+      this._setStatus(SYNC_STATUS.ERROR, errorMsg);
+      return { success: false, error: errorMsg };
+    }
+
+    return await this.sync({ allowInteractiveFallback });
   }
 
   getBaseData() {
@@ -463,20 +705,63 @@ export class SyncCoordinator {
   async _saveSyncState(time, baseData) {
     this.lastSyncTime = time;
     this.baseData = baseData ? JSON.parse(JSON.stringify(baseData)) : null;
+    this.isDirty = false;
     if (this.storage) {
       await this.storage.set({
         last_sync_time: time,
-        last_sync_base: this.baseData
+        last_sync_base: this.baseData,
+        sync_dirty: false
       });
     }
   }
 
   /**
    * 執行同步：讀取雲端、比對合併 (Smart 3-Way Merge)、更新本地、推回雲端
+   * 具備 Single-Flight 防重入鎖定，若同步期間有新請求將自動排隊接續執行
+   * @param {Object} [options]
    * @returns {Promise<{ success: boolean, stats?: Object, error?: string }>}
    */
-  async sync() {
-    const isAuth = await this.cloudAdapter.isAuthenticated();
+  async sync(options = {}) {
+    if (this._autoSyncTimer) {
+      clearTimeout(this._autoSyncTimer);
+      this._autoSyncTimer = null;
+    }
+
+    if (this._syncPromise) {
+      this._pendingSyncAfterCurrent = true;
+      this._pendingSyncOptions = options;
+      return this._syncPromise;
+    }
+
+    this._syncPromise = (async () => {
+      let result = await this._executeSync(options);
+      while (this._pendingSyncAfterCurrent) {
+        const nextOptions = this._pendingSyncOptions || {};
+        this._pendingSyncAfterCurrent = false;
+        this._pendingSyncOptions = null;
+        result = await this._executeSync(nextOptions);
+      }
+      return result;
+    })();
+
+    try {
+      return await this._syncPromise;
+    } finally {
+      this._syncPromise = null;
+    }
+  }
+
+  async _executeSync(options = {}) {
+    const allowInteractiveFallback =
+      options.allowInteractiveFallback !== undefined ? options.allowInteractiveFallback : true;
+
+    let isAuth = false;
+    if (typeof this.cloudAdapter.ensureAuthenticated === 'function') {
+      isAuth = await this.cloudAdapter.ensureAuthenticated({ allowInteractiveFallback });
+    } else {
+      isAuth = await this.cloudAdapter.isAuthenticated();
+    }
+
     if (!isAuth) {
       const errorMsg = 'Cloud adapter is not authenticated.';
       this._setStatus(SYNC_STATUS.ERROR, errorMsg);
@@ -486,14 +771,19 @@ export class SyncCoordinator {
     this._setStatus(SYNC_STATUS.SYNCING, 'Checking cloud files...');
 
     try {
-      // 1. 取得本地最新資料
-      const localData = await createUnifiedBackup(this.collectionStore, this.searchEngineStore);
+      if (this.storage) {
+        const storedState = await this.storage.get(['last_sync_base']);
+        if (storedState && storedState.last_sync_base) {
+          this.baseData = storedState.last_sync_base;
+        }
+      }
 
-      // 2. 檢查雲端是否有舊有備份檔案
+      // 1. 檢查雲端是否有舊有備份檔案
       const cloudFile = await this.cloudAdapter.findFile();
 
       if (!cloudFile) {
-        // 雲端無檔案：直接將本地資料推送至雲端，並將此版本設為基準快照
+        // 雲端無檔案：取得本地最新資料並推送至雲端
+        const localData = await createUnifiedBackup(this.collectionStore, this.searchEngineStore);
         this._setStatus(SYNC_STATUS.SYNCING, 'Uploading initial data to cloud...');
         const uploadResult = await this.cloudAdapter.uploadJson(localData);
 
@@ -513,7 +803,7 @@ export class SyncCoordinator {
         };
       }
 
-      // 3. 雲端有檔案：下載內容
+      // 2. 雲端有檔案：下載內容
       this._setStatus(SYNC_STATUS.SYNCING, 'Downloading cloud data...');
       const cloudData = await this.cloudAdapter.downloadJson(cloudFile.id);
 
@@ -522,14 +812,28 @@ export class SyncCoordinator {
         throw new Error(`Cloud data corrupted or invalid format: ${validation.error}`);
       }
 
+      // 3. 在網路請求完成後，立即讀取當前「最新、最即時」的本地快照（避免網路請求期間使用者新增的資料被覆寫）
+      const localData = await createUnifiedBackup(this.collectionStore, this.searchEngineStore);
+
       // 4. 智慧三向合併 (Smart 3-Way Merge)
       const mergedData = mergeUnifiedData(localData, cloudData, this.baseData);
 
-      // 5. 更新本地 Store
-      await restoreUnifiedBackup(mergedData, {
-        collectionStore: this.collectionStore,
-        searchEngineStore: this.searchEngineStore
-      });
+      // 5. 更新本地 Store (標記 isApplyingRemoteSync 與 sync_in_progress 防止觸發循環自動同步)
+      this.isApplyingRemoteSync = true;
+      if (this.storage) {
+        await this.storage.set({ sync_in_progress: true });
+      }
+      try {
+        await restoreUnifiedBackup(mergedData, {
+          collectionStore: this.collectionStore,
+          searchEngineStore: this.searchEngineStore
+        });
+      } finally {
+        this.isApplyingRemoteSync = false;
+        if (this.storage) {
+          await this.storage.set({ sync_in_progress: false });
+        }
+      }
 
       // 6. 將合併後的最終版本上傳至雲端，並更新基準快照
       this._setStatus(SYNC_STATUS.SYNCING, 'Updating cloud data with merged result...');
@@ -560,7 +864,12 @@ export class SyncCoordinator {
    * 強制從雲端拉取並覆蓋本地 (Force Download / Pull)
    */
   async pullFromCloud() {
-    const isAuth = await this.cloudAdapter.isAuthenticated();
+    let isAuth = false;
+    if (typeof this.cloudAdapter.ensureAuthenticated === 'function') {
+      isAuth = await this.cloudAdapter.ensureAuthenticated({ allowInteractiveFallback: true });
+    } else {
+      isAuth = await this.cloudAdapter.isAuthenticated();
+    }
     if (!isAuth) throw new Error('Not authenticated.');
 
     this._setStatus(SYNC_STATUS.SYNCING, 'Fetching cloud file...');
@@ -568,10 +877,22 @@ export class SyncCoordinator {
     if (!cloudFile) throw new Error('No cloud backup found to restore.');
 
     const cloudData = await this.cloudAdapter.downloadJson(cloudFile.id);
-    const result = await restoreUnifiedBackup(cloudData, {
-      collectionStore: this.collectionStore,
-      searchEngineStore: this.searchEngineStore
-    });
+    this.isApplyingRemoteSync = true;
+    if (this.storage) {
+      await this.storage.set({ sync_in_progress: true });
+    }
+    let result;
+    try {
+      result = await restoreUnifiedBackup(cloudData, {
+        collectionStore: this.collectionStore,
+        searchEngineStore: this.searchEngineStore
+      });
+    } finally {
+      this.isApplyingRemoteSync = false;
+      if (this.storage) {
+        await this.storage.set({ sync_in_progress: false });
+      }
+    }
 
     if (result.success) {
       const now = Date.now();
@@ -587,7 +908,12 @@ export class SyncCoordinator {
    * 強制用本地資料覆蓋雲端 (Force Upload / Push)
    */
   async pushToCloud() {
-    const isAuth = await this.cloudAdapter.isAuthenticated();
+    let isAuth = false;
+    if (typeof this.cloudAdapter.ensureAuthenticated === 'function') {
+      isAuth = await this.cloudAdapter.ensureAuthenticated({ allowInteractiveFallback: true });
+    } else {
+      isAuth = await this.cloudAdapter.isAuthenticated();
+    }
     if (!isAuth) throw new Error('Not authenticated.');
 
     this._setStatus(SYNC_STATUS.SYNCING, 'Uploading local data to cloud...');

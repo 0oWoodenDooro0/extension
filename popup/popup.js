@@ -1,6 +1,32 @@
 import { searchEngineStore } from '../searchEngineStore.js';
 
 document.addEventListener("DOMContentLoaded", async () => {
+    // 建立 Popup 生命週期連線至 background.js，關閉 Popup 時自動觸發背景 Flush Sync
+    if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.connect === 'function') {
+        try {
+            chrome.runtime.connect({ name: 'popup-lifecycle' });
+        } catch {
+            // ignore
+        }
+    }
+
+    const handlePopupClose = () => {
+        if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+            try {
+                chrome.runtime.sendMessage({ action: 'flushSync' }, () => {});
+            } catch {
+                // ignore
+            }
+        }
+    };
+
+    window.addEventListener('pagehide', handlePopupClose);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+            handlePopupClose();
+        }
+    });
+
     // UI Elements
     const listView = document.getElementById("listView");
     const formView = document.getElementById("formView");

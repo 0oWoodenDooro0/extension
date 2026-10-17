@@ -73,8 +73,11 @@ export function initCloudSyncView({
   }
 
   // 監聽狀態改變
-  syncCoordinator.onStatusChange(({ status, detail, lastSyncTime }) => {
+  syncCoordinator.onStatusChange(async ({ status, detail, lastSyncTime }) => {
     renderStatusBadge(status, detail, lastSyncTime);
+    if (status === SYNC_STATUS.SUCCESS && syncModal && syncModal.style.display === 'flex') {
+      await updateUI();
+    }
   });
 
   // 儲存自訂 Client ID
@@ -184,7 +187,14 @@ export function initCloudSyncView({
       redirectUriText.textContent = googleDriveAdapter.getRedirectUri() || '-';
     }
 
-    const isAuth = await googleDriveAdapter.isAuthenticated();
+    let isAuth = await googleDriveAdapter.isAuthenticated();
+    if (!isAuth && typeof googleDriveAdapter.canAutoConnect === 'function') {
+      const canAuto = await googleDriveAdapter.canAutoConnect();
+      if (canAuto && typeof googleDriveAdapter.ensureAuthenticated === 'function') {
+        isAuth = await googleDriveAdapter.ensureAuthenticated({ allowInteractiveFallback: false });
+      }
+    }
+
     if (isAuth) {
       if (authSection) authSection.style.display = 'none';
       if (connectedSection) connectedSection.style.display = 'block';

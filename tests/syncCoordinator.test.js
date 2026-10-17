@@ -352,4 +352,150 @@ test('Google Drive Sync & Coordinator Test Suite', async (t) => {
     assert.equal(collStore.getItems()[0].id, 'item-cloud');
     assert.equal(coordinator.getBaseData().items[0].id, 'item-cloud');
   });
+
+  await t.test('Auto-Login & Sync on Startup - Silent token renewal and fallback to interactive login', async () => {
+    const gdrive = new MemoryGoogleDriveAdapter();
+    const collStore = new CollectionStore(new CollectionMemoryAdapter());
+    const seStore = new SearchEngineStore(new SearchMemoryAdapter());
+    const storage = new CollectionMemoryAdapter();
+
+    const coordinator = new SyncCoordinator({
+      cloudAdapter: gdrive,
+      collectionStore: collStore,
+      searchEngineStore: seStore,
+      storage
+    });
+    await coordinator.init();
+
+    // When auto-connect is not enabled, autoLoginAndSync should skip cleanly
+    const skipRes = await coordinator.autoLoginAndSync({ allowInteractiveFallback: true });
+    assert.equal(skipRes.skipped, true);
+
+    // Enable auto-connect flag
+    await storage.set({ gdrive_auto_connect: true });
+
+    // Silent auth succeeds
+    gdrive.setMockAuth({ token: 'silent-tok', email: 'silent@test.com' });
+    const autoRes = await coordinator.autoLoginAndSync({ allowInteractiveFallback: false });
+    assert.equal(autoRes.success, true);
+    assert.equal(autoRes.action, 'uploaded_initial');
+  });
+
+  await t.test('Flush Pending Sync on Extension/Browser Close', async () => {
+    const gdrive = new MemoryGoogleDriveAdapter();
+    gdrive.setMockAuth({ token: 'mock-token' });
+
+    const collStore = new CollectionStore(new CollectionMemoryAdapter());
+    const seStore = new SearchEngineStore(new SearchMemoryAdapter());
+    await collStore.load();
+    await seStore.load();
+
+    const coordinator = new SyncCoordinator({
+      cloudAdapter: gdrive,
+      collectionStore: collStore,
+      searchEngineStore: seStore
+    });
+    await coordinator.init();
+
+    // Initial sync
+    await coordinator.sync();
+
+    // User adds a new item locally
+    await collStore.saveItem({
+      title: 'Saved Before Closing Browser',
+      url: 'https://close-test.com',
+      tags: ['AutoSave']
+    });
+
+    // Mark dirty (as done when storage changes)
+    await coordinator.markDirty();
+    assert.equal(coordinator.isDirty, true);
+
+    // User closes the extension/browser -> flushPendingSync executes
+    const flushRes = await coordinator.flushPendingSync();
+    assert.equal(flushRes.success, true);
+    assert.equal(coordinator.isDirty, false);
+
+    // Verify the item was saved to Google Drive immediately on close
+    const cloudFile = await gdrive.findFile();
+    const cloudData = await gdrive.downloadJson(cloudFile.id);
+    assert.equal(cloudData.items.length, 1);
+    assert.equal(cloudData.items[0].title, 'Saved Before Closing Browser');
+
+    // Calling flushPendingSync again when no changes occurred should skip cleanly
+    const secondFlush = await coordinator.flushPendingSync();
+    assert.equal(secondFlush.success, true);
+    assert.equal(secondFlush.skipped, true);
+  });
+
+  await t.test('Option A: Multi-context safety - newly added items are never dropped by background flush', async () => {
+    const gdrive = new MemoryGoogleDriveAdapter();
+    gdrive.setMockAuth({ token: 'mock-token', email: 'user@gmail.com' });
+
+    // Shared storage simulating chrome.storage.local
+    const sharedStorage = new CollectionMemoryAdapter();
+    await sharedStorage.set({ gdrive_auto_connect: true });
+
+    // Initial item in cloud
+    const initialBackup = {
+      version: 1,
+      items: [{ id: 'item-cloud-1', title: 'Existing Cloud Item', url: 'https://cloud-1.com', tags: ['work'], updatedAt: 1000 }],
+      tags: ['work'],
+      searchEngines: []
+    };
+    await gdrive.uploadJson(initialBackup);
+
+    // Context 1: Background Service Worker Store & Coordinator
+    const bgCollStore = new CollectionStore(sharedStorage);
+    const bgSeStore = new SearchEngineStore(new SearchMemoryAdapter());
+    const bgCoordinator = new SyncCoordinator({
+      cloudAdapter: gdrive,
+      collectionStore: bgCollStore,
+      searchEngineStore: bgSeStore,
+      storage: sharedStorage
+    });
+    await bgCoordinator.init();
+
+    // Context 2: Sidebar UI Store
+    const uiCollStore = new CollectionStore(sharedStorage);
+    const uiSeStore = new SearchEngineStore(new SearchMemoryAdapter());
+    await uiCollStore.load();
+
+    // Initial sync brings the cloud item into local storage
+    await bgCoordinator.sync();
+    await uiCollStore.load();
+    assert.equal(uiCollStore.items.length, 1);
+    assert.equal(uiCollStore.items[0].id, 'item-cloud-1');
+
+    // Sidebar UI adds a brand new item (saved directly to shared storage)
+    await uiCollStore.saveItem({
+      id: 'item-local-new',
+      title: 'Newly Added Local Item',
+      url: 'https://local-new.com',
+      tags: ['personal']
+    });
+
+    // Option A: Background marks dirty when storage changes, but does NOT run 3s debounce timer
+    await bgCoordinator.markDirty();
+    assert.equal(bgCoordinator.isDirty, true);
+    assert.equal(bgCoordinator._autoSyncTimer, null); // No debounced timer running
+
+    // Simulate stale in-memory cache in background
+    bgCollStore.items = [];
+    assert.equal(bgCollStore.items.length, 0);
+
+    // User closes the extension -> Background flushPendingSync is called
+    const flushResult = await bgCoordinator.flushPendingSync();
+    assert.equal(flushResult.success, true);
+    assert.equal(bgCoordinator.isDirty, false);
+
+    // Verify: createUnifiedBackup loaded fresh data from storage, so the newly added item was NOT deleted!
+    const finalCloudFile = await gdrive.findFile();
+    const finalCloudData = await gdrive.downloadJson(finalCloudFile.id);
+
+    const titles = finalCloudData.items.map(i => i.title);
+    assert.ok(titles.includes('Existing Cloud Item'), 'Existing cloud item must remain');
+    assert.ok(titles.includes('Newly Added Local Item'), 'Newly added local item must NOT be dropped');
+    assert.equal(finalCloudData.items.length, 2);
+  });
 });

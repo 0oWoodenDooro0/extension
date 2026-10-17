@@ -1,7 +1,93 @@
 import { initializeSearchShortcuts } from './utils.js';
-import { collectionStore } from './sidebar/store.js';
+import { collectionStore, ChromeStorageAdapter } from './sidebar/store.js';
+import { searchEngineStore } from './searchEngineStore.js';
+import { GoogleDriveAdapter } from './sidebar/googleDriveAdapter.js';
+import { SyncCoordinator } from './sidebar/syncCoordinator.js';
 
 initializeSearchShortcuts();
+
+// --- Background Cloud Sync Coordinator Setup ---
+const bgStorageAdapter = new ChromeStorageAdapter();
+export const bgGoogleDriveAdapter = new GoogleDriveAdapter({
+  storage: bgStorageAdapter
+});
+export const bgSyncCoordinator = new SyncCoordinator({
+  cloudAdapter: bgGoogleDriveAdapter,
+  collectionStore,
+  searchEngineStore,
+  storage: bgStorageAdapter,
+  autoSyncDebounceMs: 3000
+});
+
+/**
+ * 初始化背景自動登入與自動同步生命週期管理 (選項A：關閉與啟動時自動同步，平時不執行防抖排程)
+ * @param {SyncCoordinator} coordinator
+ * @param {Object} storageAdapter
+ */
+export async function initializeBackgroundSync(
+  coordinator = bgSyncCoordinator,
+  storageAdapter = bgStorageAdapter
+) {
+  await coordinator.init();
+
+  // 監聽跨視窗 (Sidebar / Popup) 對本地儲存的異動，僅標記 dirty，不排程倒數同步
+  // 避免平時打字或編輯時觸發多程序快取競爭或刪除剛新增的項目
+  if (storageAdapter && typeof storageAdapter.onChanged === 'function') {
+    storageAdapter.onChanged(async (changes) => {
+      if (coordinator.isApplyingRemoteSync) return;
+      if (changes.sync_in_progress && changes.sync_in_progress.newValue === true) return;
+
+      const hasDataChange = Boolean(changes.items || changes.tags || changes.searchEngines);
+      if (!hasDataChange) return;
+
+      await coordinator.markDirty();
+    });
+  }
+}
+
+initializeBackgroundSync().catch((err) => {
+  console.error('[BackgroundSync] Initialization error:', err);
+});
+
+// 1. 瀏覽器啟動時：自動登入並執行 3-Way Sync
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onStartup) {
+  chrome.runtime.onStartup.addListener(() => {
+    bgSyncCoordinator.autoLoginAndSync({ allowInteractiveFallback: true }).catch((err) => {
+      console.error('[BackgroundSync] Startup auto-sync error:', err);
+    });
+  });
+}
+
+// 2. 監聽 Extension 頁面 (Sidebar / Popup) 生命週期連線：關閉時立即自動保存 (Flush Sync)
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onConnect) {
+  chrome.runtime.onConnect.addListener((port) => {
+    if (port.name === 'sidebar-lifecycle' || port.name === 'popup-lifecycle') {
+      port.onDisconnect.addListener(() => {
+        bgSyncCoordinator.flushPendingSync().catch((err) => {
+          console.error(`[BackgroundSync] Flush sync on ${port.name} close error:`, err);
+        });
+      });
+    }
+  });
+}
+
+// 3. 監聽瀏覽器視窗關閉：當視窗關閉或最後一個視窗關閉時立即自動保存
+if (typeof chrome !== 'undefined' && chrome.windows && chrome.windows.onRemoved) {
+  chrome.windows.onRemoved.addListener(() => {
+    bgSyncCoordinator.flushPendingSync().catch((err) => {
+      console.error('[BackgroundSync] Flush sync on window close error:', err);
+    });
+  });
+}
+
+// 4. 監聽背景 Service Worker 休眠/瀏覽器關閉前事件：立即保存未同步變更
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onSuspend) {
+  chrome.runtime.onSuspend.addListener(() => {
+    bgSyncCoordinator.flushPendingSync().catch((err) => {
+      console.error('[BackgroundSync] Flush sync on suspend error:', err);
+    });
+  });
+}
 
 /**
  * 安全解析絕對 URL
@@ -9,119 +95,138 @@ initializeSearchShortcuts();
  * @param {string} baseUrl 
  * @returns {string}
  */
-export function resolveImageUrl(rawUrl, baseUrl) {
-  if (!rawUrl) return '';
+export function resolveUrl(rawUrl, baseUrl) {
   try {
     return new URL(rawUrl, baseUrl).href;
-  } catch (e) {
-    if (rawUrl.startsWith('/') && baseUrl) {
-      try {
-        const baseObj = new URL(baseUrl);
-        return baseObj.origin + rawUrl;
-      } catch (err) {
-        return rawUrl;
-      }
-    }
+  } catch {
     return rawUrl;
   }
 }
 
 /**
- * 從 HTML 字串解析 og:image 的 content 屬性，並將相對路徑轉為絕對 URL
- * @param {string} html 
- * @param {string} baseUrl 
+ * 輔助方法：從 HTML 字串中依序解析 Open Graph / Twitter / Link Rel / First Img
+ * @param {string} htmlText 
+ * @param {string} pageUrl 
  * @returns {string|null}
  */
-export function extractOgImageFromHtml(html, baseUrl) {
-  if (!html || typeof html !== 'string') return null;
+export function extractImageFromHtml(htmlText, pageUrl) {
+  if (!htmlText || typeof htmlText !== 'string') return null;
 
-  // 匹配 <meta property="og:image" content="..."> 或 <meta content="..." property="og:image">
-  // 同時支援 property 或 name 屬性與各種屬性順序
-  const ogImageRegex = /<meta\s+[^>]*?(?:property|name)=["']og:image["'][^>]*?content=["']([^"']+)["'][^>]*?>|<meta\s+[^>]*?content=["']([^"']+)["'][^>]*?(?:property|name)=["']og:image["'][^>]*?>/i;
-  const match = html.match(ogImageRegex);
-  if (!match) return null;
-
-  const rawUrl = (match[1] || match[2] || '').trim();
-  if (!rawUrl) return null;
-
-  return resolveImageUrl(rawUrl, baseUrl);
-}
-
-// 尋找主網域與路徑匹配的已開啟分頁，並直接注入腳本提取 og:image (支援 JS 動態渲染 DOM)
-export async function getImageFromExistingTab(url) {
-  try {
-    if (typeof chrome === 'undefined' || !chrome.tabs || !chrome.tabs.query || !chrome.scripting) {
-      return null;
-    }
-
-    const tabs = await chrome.tabs.query({});
-    const targetUrlObj = new URL(url);
-    
-    // 尋找與目標 URL 的 origin 與 pathname 匹配的分頁 (忽略 hash 與 query 差異以提高匹配率)
-    const matchingTab = tabs.find(t => {
-      try {
-        const tabUrlObj = new URL(t.url);
-        return tabUrlObj.origin === targetUrlObj.origin && tabUrlObj.pathname === targetUrlObj.pathname;
-      } catch (e) {
-        return false;
-      }
-    });
-
-    if (matchingTab) {
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: matchingTab.id },
-        func: () => {
-          const metas = document.querySelectorAll("meta[property='og:image'], meta[name='og:image']");
-          if (metas && metas.length > 0) {
-            // 對於動態 SPA 網站，切換頁面後動態新增的最新 og:image 會排在最後面，因此取最後一個
-            const meta = metas[metas.length - 1];
-            if (meta && meta.content) {
-              const content = meta.content.trim();
-              try {
-                return new URL(content, window.location.href).href;
-              } catch (e) {
-                if (content.startsWith('/')) {
-                  return window.location.origin + content;
-                }
-                return content;
-              }
-            }
-          }
-          return null;
-        }
-      });
-      return (results && results[0]) ? results[0].result : null;
-    }
-  } catch (error) {
-    // 忽略錯誤以保持主控台乾淨
+  // 1. og:image (支援 property 或 name 屬性)
+  const ogMatch = htmlText.match(/<meta\s+[^>]*(?:property|name)=["']og:image["'][^>]*content=["']([^"']+)["']/i) ||
+                  htmlText.match(/<meta\s+[^>]*content=["']([^"']+)["'][^>]*(?:property|name)=["']og:image["']/i);
+  if (ogMatch && ogMatch[1]) {
+    return resolveUrl(ogMatch[1].trim(), pageUrl);
   }
+
+  // 2. twitter:image (支援 name 或 property 屬性)
+  const twitterMatch = htmlText.match(/<meta\s+[^>]*(?:name|property)=["']twitter:image["'][^>]*content=["']([^"']+)["']/i) ||
+                       htmlText.match(/<meta\s+[^>]*content=["']([^"']+)["'][^>]*(?:name|property)=["']twitter:image["']/i);
+  if (twitterMatch && twitterMatch[1]) {
+    return resolveUrl(twitterMatch[1].trim(), pageUrl);
+  }
+
+  // 3. link rel="image_src"
+  const imageSrcMatch = htmlText.match(/<link\s+[^>]*rel=["']image_src["'][^>]*href=["']([^"']+)["']/i) ||
+                        htmlText.match(/<link\s+[^>]*href=["']([^"']+)["'][^>]*rel=["']image_src["']/i);
+  if (imageSrcMatch && imageSrcMatch[1]) {
+    return resolveUrl(imageSrcMatch[1].trim(), pageUrl);
+  }
+
+  // 4. link rel="apple-touch-icon"
+  const appleIconMatch = htmlText.match(/<link\s+[^>]*rel=["']apple-touch-icon["'][^>]*href=["']([^"']+)["']/i) ||
+                         htmlText.match(/<link\s+[^>]*href=["']([^"']+)["'][^>]*rel=["']apple-touch-icon["']/i);
+  if (appleIconMatch && appleIconMatch[1]) {
+    return resolveUrl(appleIconMatch[1].trim(), pageUrl);
+  }
+
+  // 5. 頁面第一個符合條件的 <img> 標籤 (排除常見小圖示/追蹤像素)
+  const imgMatches = htmlText.matchAll(/<img\s+[^>]*src=["']([^"']+)["'][^>]*>/gi);
+  for (const match of imgMatches) {
+    const src = match[1]?.trim();
+    if (!src) continue;
+    // 排除 svg, tracking pixel, data:image
+    if (src.startsWith('data:') || src.endsWith('.svg') || src.includes('pixel') || src.includes('1x1')) {
+      continue;
+    }
+    return resolveUrl(src, pageUrl);
+  }
+
   return null;
 }
 
-// 當未開啟分頁時，透過背景直接 fetch HTML 並解析 og:image (Fallback)
-export async function fetchImageFromHtml(url) {
+// 導出向後相容別名供既有模組與測試使用
+export { resolveUrl as resolveImageUrl, extractImageFromHtml as extractOgImageFromHtml };
+
+/**
+ * 透過背景 fetch 獲取指定 URL 的 HTML 並解析代表性圖片 (Fallback 機制)
+ * @param {string} pageUrl 
+ * @returns {Promise<string|null>}
+ */
+export async function fetchImageFromHtml(pageUrl) {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000); // 4 秒逾時保護
-    const response = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeoutId);
+    const response = await fetch(pageUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+      },
+      signal: AbortSignal.timeout(5000) // 5 秒逾時保護
+    });
 
     if (!response.ok) return null;
-    const html = await response.text();
-    return extractOgImageFromHtml(html, url);
-  } catch (e) {
-    // 忽略網路錯誤或逾時
+    const htmlText = await response.text();
+    return extractImageFromHtml(htmlText, pageUrl);
+  } catch (err) {
+    console.warn(`[Background] Failed to fetch HTML for ${pageUrl}:`, err.message);
     return null;
   }
 }
 
-// 統一圖片擷取流程：優先匹配開啟的分頁，未開啟則使用背景 Fetch Fallback
+/**
+ * 取得指定 URL 的代表性圖片 (優先查詢已開啟的分頁 DOM，失敗則使用 fetch Fallback)
+ * @param {string} url 
+ * @returns {Promise<string|null>}
+ */
 export async function getImageForUrl(url) {
-  if (!url || typeof url !== 'string') return null;
+  if (!url) return null;
 
-  // 1. 優先從已開啟的分頁 DOM 中提取
-  let imageUrl = await getImageFromExistingTab(url);
-  if (imageUrl) return imageUrl;
+  let imageUrl = null;
+
+  // 1. 優先嘗試比對目前所有開啟的分頁
+  try {
+    const tabs = await chrome.tabs.query({});
+    const matchedTab = tabs.find(t => t.url === url);
+
+    if (matchedTab && matchedTab.id) {
+      try {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: matchedTab.id },
+          func: () => {
+            const ogImage = document.querySelector('meta[property="og:image"]');
+            if (ogImage && ogImage.content) return ogImage.content;
+            const twitterImage = document.querySelector('meta[name="twitter:image"]');
+            if (twitterImage && twitterImage.content) return twitterImage.content;
+            const linkImage = document.querySelector('link[rel="image_src"]');
+            if (linkImage && linkImage.href) return linkImage.href;
+            const appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
+            if (appleIcon && appleIcon.href) return appleIcon.href;
+            const firstImg = document.querySelector('article img, main img, img');
+            if (firstImg && firstImg.src && !firstImg.src.startsWith('data:')) return firstImg.src;
+            return null;
+          }
+        });
+
+        if (results && results[0] && results[0].result) {
+          imageUrl = results[0].result;
+          return imageUrl;
+        }
+      } catch (err) {
+        console.warn(`[Background] executeScript failed on tab ${matchedTab.id}:`, err.message);
+      }
+    }
+  } catch (tabsErr) {
+    console.warn('[Background] tabs.query failed:', tabsErr.message);
+  }
 
   // 2. 若無匹配已開啟分頁，透過背景直接 fetch HTML 作為 Fallback
   imageUrl = await fetchImageFromHtml(url);
@@ -130,6 +235,8 @@ export async function getImageForUrl(url) {
 
 if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (!request || typeof request !== 'object') return false;
+
     // 監聽側邊欄的 'getImage' 請求
     if (request.action === 'getImage' && request.url) {
       getImageForUrl(request.url)
@@ -140,7 +247,27 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
           sendResponse({ imageUrl: null });
         });
 
-      // 異步回傳指示
+      return true;
+    }
+
+    // 監聽開啟時自動登入與同步請求
+    if (request.action === 'autoLoginAndSync') {
+      bgSyncCoordinator
+        .autoLoginAndSync({
+          allowInteractiveFallback:
+            request.allowInteractiveFallback !== undefined ? request.allowInteractiveFallback : true
+        })
+        .then(res => sendResponse(res))
+        .catch(err => sendResponse({ success: false, error: err.message }));
+      return true;
+    }
+
+    // 監聽關閉時立即保存 (Flush Sync) 請求
+    if (request.action === 'flushSync') {
+      bgSyncCoordinator
+        .flushPendingSync({ force: !!request.force })
+        .then(res => sendResponse(res))
+        .catch(err => sendResponse({ success: false, error: err.message }));
       return true;
     }
   });
@@ -243,7 +370,7 @@ export async function showSaveFeedback(tab, { isExisting = false, title = '' } =
         args: [msg, isExisting]
       });
     } catch (e) {
-      // 忽略受保護網頁 (例如 chrome:// 頁面或 Chrome Web Store) 的腳本注入錯誤
+      // 忽略受保護網頁的腳本注入錯誤
     }
   }
 }
@@ -309,4 +436,3 @@ if (typeof chrome !== 'undefined' && chrome.commands && chrome.commands.onComman
     }
   });
 }
-

@@ -28,15 +28,16 @@ export function validateBackupPayload(payload) {
 
 /**
  * 生成包含 Collection 與 SearchEngine 的統一備份快照 (深拷貝)
+ * 強制重新從底層 Storage 載入最新資料，確保不會讀取到跨視窗的過期記憶體快取
  * @param {Object} collectionStore 
  * @param {Object} searchEngineStore 
  * @returns {Promise<Object>}
  */
 export async function createUnifiedBackup(collectionStore, searchEngineStore) {
-  if (collectionStore && !collectionStore.isLoaded && typeof collectionStore.load === 'function') {
+  if (collectionStore && typeof collectionStore.load === 'function') {
     await collectionStore.load();
   }
-  if (searchEngineStore && !searchEngineStore.isLoaded && typeof searchEngineStore.load === 'function') {
+  if (searchEngineStore && typeof searchEngineStore.load === 'function') {
     await searchEngineStore.load();
   }
 
@@ -55,7 +56,7 @@ export async function createUnifiedBackup(collectionStore, searchEngineStore) {
  * 復原統一備份資料至 CollectionStore 與 SearchEngineStore
  * @param {Object} payload 
  * @param {{ collectionStore: Object, searchEngineStore: Object }} stores 
- * @returns {Promise<{ success: boolean, restored?: Object, error?: string }>}
+ * @returns {Promise<{ success: boolean, restored?: Object, error?: string }>
  */
 export async function restoreUnifiedBackup(payload, { collectionStore, searchEngineStore }) {
   const validation = validateBackupPayload(payload);
@@ -63,10 +64,10 @@ export async function restoreUnifiedBackup(payload, { collectionStore, searchEng
     return { success: false, error: validation.error };
   }
 
-  if (collectionStore && !collectionStore.isLoaded && typeof collectionStore.load === 'function') {
+  if (collectionStore && typeof collectionStore.load === 'function') {
     await collectionStore.load();
   }
-  if (searchEngineStore && !searchEngineStore.isLoaded && typeof searchEngineStore.load === 'function') {
+  if (searchEngineStore && typeof searchEngineStore.load === 'function') {
     await searchEngineStore.load();
   }
 

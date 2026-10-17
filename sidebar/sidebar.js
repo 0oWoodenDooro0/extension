@@ -35,6 +35,39 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   await syncCoordinator.init();
 
+  // 建立生命週期長連線至 background.js，當關閉側邊欄或瀏覽器時自動觸發背景 Flush Sync
+  if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.connect === 'function') {
+    try {
+      chrome.runtime.connect({ name: 'sidebar-lifecycle' });
+    } catch {
+      // ignore
+    }
+  }
+
+  // 當頁面隱藏或關閉時，主動通知背景立即保存未同步的變更 (Flush Sync)
+  const handleCloseFlush = () => {
+    if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+      try {
+        chrome.runtime.sendMessage({ action: 'flushSync' }, () => {
+          if (chrome.runtime.lastError) {
+            syncCoordinator.flushPendingSync().catch(() => {});
+          }
+        });
+        return;
+      } catch {
+        // fallback below
+      }
+    }
+    syncCoordinator.flushPendingSync().catch(() => {});
+  };
+
+  window.addEventListener('pagehide', handleCloseFlush);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      handleCloseFlush();
+    }
+  });
+
   initCloudSyncView({
     googleDriveAdapter,
     syncCoordinator,
@@ -156,10 +189,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // --- Initial Load ---
+  // --- Initial Load & Startup Auto-Login Sync ---
   try {
     await collectionStore.load();
     displayMainLibrary();
+
+    // 每次開啟側邊欄時，若已綁定雲端帳號則自動登入並執行 3-Way Sync
+    if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+      chrome.runtime.sendMessage(
+        { action: 'autoLoginAndSync', allowInteractiveFallback: true },
+        (res) => {
+          if (chrome.runtime.lastError || !res) {
+            syncCoordinator.autoLoginAndSync({ allowInteractiveFallback: true }).catch(() => {});
+          }
+        }
+      );
+    } else {
+      syncCoordinator.autoLoginAndSync({ allowInteractiveFallback: true }).catch(() => {});
+    }
   } catch (e) {
     console.error("Failed to load data:", e);
   }
