@@ -447,7 +447,7 @@ test('Google Drive Sync & Coordinator Test Suite', async (t) => {
 
     // Context 1: Background Service Worker Store & Coordinator
     const bgCollStore = new CollectionStore(sharedStorage);
-    const bgSeStore = new SearchEngineStore(new SearchMemoryAdapter());
+    const bgSeStore = new SearchEngineStore(sharedStorage);
     const bgCoordinator = new SyncCoordinator({
       cloudAdapter: gdrive,
       collectionStore: bgCollStore,
@@ -458,7 +458,7 @@ test('Google Drive Sync & Coordinator Test Suite', async (t) => {
 
     // Context 2: Sidebar UI Store
     const uiCollStore = new CollectionStore(sharedStorage);
-    const uiSeStore = new SearchEngineStore(new SearchMemoryAdapter());
+    const uiSeStore = new SearchEngineStore(sharedStorage);
     await uiCollStore.load();
 
     // Initial sync brings the cloud item into local storage

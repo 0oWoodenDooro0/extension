@@ -1,98 +1,15 @@
 // searchEngineStore.js - 快捷搜尋深層模組 (Deep Search Engine Module)
 // 封裝搜尋引擎項目的 CRUD、儲存適配器、正規表達式解析替換、URL 模板編譯與跨視窗狀態同步
 
+import { MemoryStorageAdapter, ChromeStorageAdapter } from './sidebar/store.js';
+
+// 向後相容重新導出共用儲存適配器
+export { MemoryStorageAdapter, ChromeStorageAdapter };
+
 let engineIdCounter = 0;
 function generateEngineId() {
   engineIdCounter = (engineIdCounter + 1) % 100000;
   return `engine-${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${engineIdCounter}`;
-}
-
-/**
- * 記憶體儲存適配器 (適用於測試環境與非瀏覽器環境)
- */
-export class MemoryStorageAdapter {
-  constructor(initialData = {}) {
-    this.data = {
-      searchEngines: initialData.searchEngines ? JSON.parse(JSON.stringify(initialData.searchEngines)) : []
-    };
-    this.listeners = [];
-  }
-
-  async get(keys) {
-    const keyList = Array.isArray(keys) ? keys : [keys];
-    const result = {};
-    keyList.forEach(key => {
-      if (this.data[key] !== undefined) {
-        result[key] = JSON.parse(JSON.stringify(this.data[key]));
-      }
-    });
-    return result;
-  }
-
-  async set(itemsObject) {
-    const changes = {};
-    for (const [key, val] of Object.entries(itemsObject)) {
-      const oldVal = this.data[key];
-      this.data[key] = JSON.parse(JSON.stringify(val));
-      changes[key] = { oldValue: oldVal, newValue: this.data[key] };
-    }
-    this.listeners.forEach(fn => fn(changes, 'local'));
-  }
-
-  onChanged(callback) {
-    this.listeners.push(callback);
-    return () => {
-      this.listeners = this.listeners.filter(cb => cb !== callback);
-    };
-  }
-}
-
-/**
- * 瀏覽器 Chrome Storage 適配器
- */
-export class ChromeStorageAdapter {
-  async get(keys) {
-    return new Promise((resolve, reject) => {
-      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
-        return resolve({});
-      }
-      chrome.storage.local.get(keys, (result) => {
-        if (chrome.runtime && chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError);
-        } else {
-          resolve(result);
-        }
-      });
-    });
-  }
-
-  async set(itemsObject) {
-    return new Promise((resolve, reject) => {
-      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
-        return resolve();
-      }
-      chrome.storage.local.set(itemsObject, () => {
-        if (chrome.runtime && chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError);
-        } else {
-          resolve();
-        }
-      });
-    });
-  }
-
-  onChanged(callback) {
-    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
-      const listener = (changes, area) => {
-        if (area === 'local') {
-          callback(changes, area);
-        }
-      };
-      chrome.storage.onChanged.addListener(listener);
-      return () => chrome.storage.onChanged.removeListener(listener);
-    }
-    return () => {};
-  }
 }
 
 /**
@@ -294,7 +211,7 @@ export class SearchEngineStore {
       return false;
     }
 
-    this.engines = data.searchEngines;
+    this.engines = JSON.parse(JSON.stringify(data.searchEngines));
     await this.persist();
     this.notify({ type: 'imported' });
     return true;

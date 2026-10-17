@@ -1,5 +1,5 @@
 // store.js - 深度資料模組 (Deep Collection Module)
-// 封裝所有項目 CRUD、標籤串聯異動、項目去重、ID/時間戳生成與儲存持久化
+// 封裝所有項目 CRUD、標籤串聯異動、項目去重、ID/時間戳生成、統一儲存適配器與快照匯出/還原
 
 export const UNTAGGED_TAG = '_UNTAGGED_';
 
@@ -11,25 +11,47 @@ function generateUniqueId() {
 
 /**
  * 記憶體儲存適配器 (適用於測試環境與無瀏覽器運行環境)
+ * 支援所有鍵值 (items, tags, searchEngines, 以及自訂同步狀態)
  */
 export class MemoryStorageAdapter {
   constructor(initialData = {}) {
-    this.data = {
-      items: initialData.items ? JSON.parse(JSON.stringify(initialData.items)) : [],
-      tags: initialData.tags ? JSON.parse(JSON.stringify(initialData.tags)) : []
-    };
+    this.data = JSON.parse(JSON.stringify(initialData || {}));
+    if (!this.data.items) this.data.items = [];
+    if (!this.data.tags) this.data.tags = [];
+    if (!this.data.searchEngines) this.data.searchEngines = [];
     this.listeners = [];
   }
 
   async get(keys) {
-    const keyList = Array.isArray(keys) ? keys : [keys];
-    const result = {};
-    keyList.forEach(key => {
-      if (this.data[key] !== undefined) {
-        result[key] = JSON.parse(JSON.stringify(this.data[key]));
+    if (keys === null || keys === undefined) {
+      return JSON.parse(JSON.stringify(this.data));
+    }
+    if (typeof keys === 'string') {
+      const result = {};
+      if (this.data[keys] !== undefined) {
+        result[keys] = JSON.parse(JSON.stringify(this.data[keys]));
       }
-    });
-    return result;
+      return result;
+    }
+    if (Array.isArray(keys)) {
+      const result = {};
+      keys.forEach(key => {
+        if (this.data[key] !== undefined) {
+          result[key] = JSON.parse(JSON.stringify(this.data[key]));
+        }
+      });
+      return result;
+    }
+    if (typeof keys === 'object') {
+      const result = {};
+      for (const [key, defaultVal] of Object.entries(keys)) {
+        result[key] = this.data[key] !== undefined
+          ? JSON.parse(JSON.stringify(this.data[key]))
+          : defaultVal;
+      }
+      return result;
+    }
+    return {};
   }
 
   async set(itemsObject) {
@@ -39,6 +61,27 @@ export class MemoryStorageAdapter {
       this.data[key] = JSON.parse(JSON.stringify(val));
       changes[key] = { oldValue: oldVal, newValue: this.data[key] };
     }
+    this.listeners.forEach(fn => fn(changes, 'local'));
+  }
+
+  async remove(keys) {
+    const keyList = Array.isArray(keys) ? keys : [keys];
+    const changes = {};
+    for (const key of keyList) {
+      if (this.data[key] !== undefined) {
+        changes[key] = { oldValue: this.data[key], newValue: undefined };
+        delete this.data[key];
+      }
+    }
+    this.listeners.forEach(fn => fn(changes, 'local'));
+  }
+
+  async clear() {
+    const changes = {};
+    for (const [key, val] of Object.entries(this.data)) {
+      changes[key] = { oldValue: val, newValue: undefined };
+    }
+    this.data = { items: [], tags: [], searchEngines: [] };
     this.listeners.forEach(fn => fn(changes, 'local'));
   }
 
@@ -84,6 +127,36 @@ export class ChromeStorageAdapter {
     });
   }
 
+  async remove(keys) {
+    return new Promise((resolve, reject) => {
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+        return resolve();
+      }
+      chrome.storage.local.remove(keys, () => {
+        if (chrome.runtime && chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  async clear() {
+    return new Promise((resolve, reject) => {
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+        return resolve();
+      }
+      chrome.storage.local.clear(() => {
+        if (chrome.runtime && chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
   onChanged(callback) {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
       const listener = (changes, area) => {
@@ -102,8 +175,9 @@ export class ChromeStorageAdapter {
  * CollectionStore 深度模組
  */
 export class CollectionStore {
-  constructor(storageAdapter = null) {
+  constructor(storageAdapter = null, { searchEngineStore = null } = {}) {
     this.adapter = storageAdapter || (typeof chrome !== 'undefined' && chrome.storage ? new ChromeStorageAdapter() : new MemoryStorageAdapter());
+    this.searchEngineStore = searchEngineStore;
     this.items = [];
     this.tags = [];
     this.subscribers = new Set();
@@ -485,11 +559,179 @@ export class CollectionStore {
       return false;
     }
 
-    this.items = data.items;
-    this.tags = data.tags;
+    this.items = JSON.parse(JSON.stringify(data.items));
+    this.tags = JSON.parse(JSON.stringify(data.tags));
     await this.persist();
     this.notify({ type: 'imported' });
     return true;
+  }
+
+  // --- 統一快照與備份管理 (Unified Snapshot & Backup Management) ---
+
+  /**
+   * 靜態方法：驗證快照結構並回傳結構摘要
+   */
+  static validateSnapshot(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return {
+        valid: false,
+        error: 'Invalid backup format: payload must be a non-null object.',
+        hasItems: false,
+        hasTags: false,
+        hasSearchEngines: false,
+        counts: { items: 0, tags: 0, searchEngines: 0 }
+      };
+    }
+
+    if (!Array.isArray(payload.items)) {
+      return {
+        valid: false,
+        error: 'Invalid backup format: items must be an array.',
+        hasItems: false,
+        hasTags: false,
+        hasSearchEngines: false,
+        counts: { items: 0, tags: 0, searchEngines: 0 }
+      };
+    }
+
+    if (!Array.isArray(payload.tags)) {
+      return {
+        valid: false,
+        error: 'Invalid backup format: tags must be an array.',
+        hasItems: true,
+        hasTags: false,
+        hasSearchEngines: false,
+        counts: { items: payload.items.length, tags: 0, searchEngines: 0 }
+      };
+    }
+
+    if (payload.searchEngines !== undefined && !Array.isArray(payload.searchEngines)) {
+      return {
+        valid: false,
+        error: 'Invalid backup format: searchEngines must be an array when present.',
+        hasItems: true,
+        hasTags: true,
+        hasSearchEngines: false,
+        counts: { items: payload.items.length, tags: payload.tags.length, searchEngines: 0 }
+      };
+    }
+
+    const hasSearchEngines = Array.isArray(payload.searchEngines);
+    return {
+      valid: true,
+      error: null,
+      hasItems: true,
+      hasTags: true,
+      hasSearchEngines,
+      counts: {
+        items: payload.items.length,
+        tags: payload.tags.length,
+        searchEngines: hasSearchEngines ? payload.searchEngines.length : 0
+      }
+    };
+  }
+
+  /**
+   * 實例方法轉發至靜態 validateSnapshot
+   */
+  validateSnapshot(payload) {
+    return CollectionStore.validateSnapshot(payload);
+  }
+
+  /**
+   * 統一快照匯出 (Unified Snapshot Export)
+   * 強制從底層 Storage 重新載入最新狀態，防止多執行環境 (Multi-context) 快取覆蓋
+   */
+  async exportSnapshot(searchEngineStore = this.searchEngineStore) {
+    await this.load();
+    if (searchEngineStore && typeof searchEngineStore.load === 'function') {
+      await searchEngineStore.load();
+    }
+
+    let searchEngines = [];
+    if (searchEngineStore) {
+      if (typeof searchEngineStore.getEngines === 'function') {
+        searchEngines = searchEngineStore.getEngines();
+      } else if (typeof searchEngineStore.exportData === 'function') {
+        searchEngines = searchEngineStore.exportData().searchEngines || [];
+      }
+    } else {
+      const data = await this.adapter.get('searchEngines');
+      if (Array.isArray(data.searchEngines)) {
+        searchEngines = data.searchEngines;
+      }
+    }
+
+    return {
+      version: 1,
+      timestamp: Date.now(),
+      items: JSON.parse(JSON.stringify(this.items || [])),
+      tags: JSON.parse(JSON.stringify(this.tags || [])),
+      searchEngines: JSON.parse(JSON.stringify(searchEngines || []))
+    };
+  }
+
+  /**
+   * 統一快照還原 (Unified Snapshot Restore)
+   * 原子性校驗並還原 items, tags 與 searchEngines，相容未包含 searchEngines 的舊版快照
+   */
+  async restoreSnapshot(payload, { searchEngineStore = this.searchEngineStore } = {}) {
+    const validation = CollectionStore.validateSnapshot(payload);
+    if (!validation.valid) {
+      return { success: false, error: validation.error };
+    }
+
+    // 確保最新狀態
+    await this.load();
+    if (searchEngineStore && typeof searchEngineStore.load === 'function') {
+      await searchEngineStore.load();
+    }
+
+    const collSuccess = await this.importData(payload);
+    if (!collSuccess) {
+      return { success: false, error: 'Failed to import collections into collection store.' };
+    }
+
+    let searchEnginesCount = null;
+    if (Array.isArray(payload.searchEngines)) {
+      if (searchEngineStore && typeof searchEngineStore.importData === 'function') {
+        const seSuccess = await searchEngineStore.importData(payload);
+        if (!seSuccess) {
+          return { success: false, error: 'Failed to import search engines into search engine store.' };
+        }
+      } else {
+        await this.adapter.set({ searchEngines: JSON.parse(JSON.stringify(payload.searchEngines)) });
+      }
+      searchEnginesCount = payload.searchEngines.length;
+    }
+
+    return {
+      success: true,
+      restored: {
+        itemsCount: payload.items.length,
+        tagsCount: payload.tags.length,
+        searchEnginesCount
+      }
+    };
+  }
+
+  /**
+   * 匯出備份檔案並透過 tabAdapter 下載
+   */
+  async exportBackupFile(tabAdapter, { filename = null, searchEngineStore = this.searchEngineStore } = {}) {
+    const backupData = await this.exportSnapshot(searchEngineStore);
+    const todayStr = new Date().toISOString().split('T')[0];
+    const finalFilename = filename || `collection_backup_${todayStr}.json`;
+
+    if (tabAdapter && typeof tabAdapter.downloadJson === 'function') {
+      await tabAdapter.downloadJson(backupData, finalFilename);
+    }
+
+    return {
+      success: true,
+      filename: finalFilename,
+      data: backupData
+    };
   }
 }
 

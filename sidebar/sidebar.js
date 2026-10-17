@@ -1,7 +1,6 @@
 import { collectionStore, ChromeStorageAdapter } from './store.js';
 import { searchEngineStore } from '../searchEngineStore.js';
 import { tabAdapter } from '../tabAdapter.js';
-import { exportBackupFile, restoreUnifiedBackup } from './backupCoordinator.js';
 import { GoogleDriveAdapter } from './googleDriveAdapter.js';
 import { SyncCoordinator } from './syncCoordinator.js';
 import { initCloudSyncView } from './cloudSyncView.js';
@@ -48,80 +47,104 @@ document.addEventListener('DOMContentLoaded', async () => {
   const handleCloseFlush = () => {
     if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
       try {
-        chrome.runtime.sendMessage({ action: 'flushSync' }, () => {
-          if (chrome.runtime.lastError) {
-            syncCoordinator.flushPendingSync().catch(() => {});
-          }
+        chrome.runtime.sendMessage({ action: 'flushPendingSync' }, () => {
+          // Ignore response or lastError during unload
+          if (chrome.runtime.lastError) {}
         });
-        return;
       } catch {
-        // fallback below
+        // ignore
       }
     }
-    syncCoordinator.flushPendingSync().catch(() => {});
   };
 
   window.addEventListener('pagehide', handleCloseFlush);
+  window.addEventListener('beforeunload', handleCloseFlush);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       handleCloseFlush();
     }
   });
 
-  initCloudSyncView({
-    googleDriveAdapter,
-    syncCoordinator,
-    onSyncComplete: () => {
-      displayMainLibrary();
-    },
-    onClose: () => {}
-  });
+  // 接收背景發出的同步完成通知，並即時更新側邊欄視圖
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message && message.action === 'syncCompleted') {
+        collectionStore.load().then(() => {
+          if (currentViewName === 'manage') {
+            displayManageTagList();
+          } else if (currentViewName === 'items') {
+            refreshItemsList();
+          }
+        }).catch(() => {});
+      }
+    });
+  }
 
-  // --- Global Controller State ---
-  let currentViewName = 'items'; // 'items', 'add', 'manage'
+  // --- View States ---
+  let currentViewName = 'items'; // 'items' | 'add' | 'manage'
 
-  // --- Initialization ---
-
-  // 1. 初始化項目列表視圖
+  // --- Initialize Sub-views ---
   initItemsView({
-    onEditItem: (itemId) => {
+    collectionStore,
+    searchEngineStore,
+    tabAdapter,
+    onEditItem: (item) => {
       showView(addItemView);
-      showAddItemView(itemId); // 進入編輯模式
+      currentViewName = 'add';
+      showAddItemView({ item });
     }
   });
 
-  // 2. 初始化新增/編輯視圖
   initAddItemView({
-    onSave: () => handleAddEditFinished(),
-    onCancel: () => handleAddEditFinished(),
-    onDelete: () => handleAddEditFinished()
-  });
-
-  // 3. 初始化標籤管理視圖
-  initManageTagsView({
-    onClose: () => {
-      displayMainLibrary(); // 關閉管理介面，回到主頁
+    collectionStore,
+    tabAdapter,
+    onSaveSuccess: () => {
+      handleAddEditFinished();
+    },
+    onCancel: () => {
+      displayMainLibrary();
     }
   });
 
-  // --- Event Listeners (Main Navigation) ---
+  initManageTagsView({
+    collectionStore,
+    onBack: () => {
+      displayMainLibrary();
+    }
+  });
+
+  initCloudSyncView({
+    syncCoordinator
+  });
+
+  // --- Toolbar Event Listeners ---
+  if (addItemButton) {
+    addItemButton.addEventListener('click', () => {
+      showView(addItemView);
+      currentViewName = 'add';
+      showAddItemView({ item: null });
+    });
+  }
+
   if (manageTagsButton) {
     manageTagsButton.addEventListener('click', () => {
       showView(manageTagsView);
+      currentViewName = 'manage';
       showManageTagsView();
     });
   }
 
-  if (addItemButton) {
-    addItemButton.addEventListener('click', () => {
-      showView(addItemView);
-      showAddItemView(null); // 進入新增模式
-    });
+  if (exportButton) {
+    exportButton.addEventListener('click', exportData);
   }
 
-  if (exportButton) exportButton.addEventListener('click', exportData);
-  if (importButton) importButton.addEventListener('click', () => fileInput && fileInput.click());
-  if (fileInput) fileInput.addEventListener('change', importData);
+  if (importButton) {
+    importButton.addEventListener('click', () => fileInput && fileInput.click());
+  }
+
+  if (fileInput) {
+    fileInput.addEventListener('change', importData);
+  }
 
   // --- Navigation Logic ---
 
@@ -148,7 +171,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // --- Import/Export Logic ---
   async function exportData() {
-    await exportBackupFile(collectionStore, searchEngineStore, tabAdapter);
+    await collectionStore.exportBackupFile(tabAdapter, { searchEngineStore });
   }
 
   async function importData(event) {
@@ -158,13 +181,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       reader.onload = async (e) => {
         try {
           const importedData = JSON.parse(e.target.result);
-          const hasSearchEngines = importedData && Array.isArray(importedData.searchEngines);
-          const confirmMsg = hasSearchEngines
+          const validation = collectionStore.validateSnapshot(importedData);
+          if (!validation.valid) {
+            alert(`Failed to import backup: ${validation.error || 'Invalid format'}`);
+            return;
+          }
+
+          const confirmMsg = validation.hasSearchEngines
             ? "Overwrite collections and search shortcuts?"
             : "Overwrite collections?";
 
           if (confirm(confirmMsg)) {
-            const result = await restoreUnifiedBackup(importedData, { collectionStore, searchEngineStore });
+            const result = await collectionStore.restoreSnapshot(importedData, { searchEngineStore });
             if (result.success) {
               displayMainLibrary();
             } else {

@@ -1,6 +1,8 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { CollectionStore, MemoryStorageAdapter, UNTAGGED_TAG } from '../sidebar/store.js';
+import { CollectionStore, MemoryStorageAdapter, ChromeStorageAdapter, UNTAGGED_TAG } from '../sidebar/store.js';
+import { SearchEngineStore } from '../searchEngineStore.js';
+import { MemoryTabAdapter, BrowserTabAdapter } from '../tabAdapter.js';
 
 describe('CollectionStore (Deep Module)', () => {
   let adapter;
@@ -463,5 +465,297 @@ describe('CollectionStore (Deep Module)', () => {
       assert.strictEqual(notificationCount, 3); // No more notifications
     });
   });
-});
 
+  describe('Single Unified StorageAdapter Seam', () => {
+    it('initializes with items, tags, and searchEngines arrays and preserves custom keys', async () => {
+      const customAdapter = new MemoryStorageAdapter({
+        custom_key: 'custom_val',
+        last_sync_time: 123456
+      });
+
+      const data = await customAdapter.get(null);
+      assert.deepStrictEqual(data.items, []);
+      assert.deepStrictEqual(data.tags, []);
+      assert.deepStrictEqual(data.searchEngines, []);
+      assert.strictEqual(data.custom_key, 'custom_val');
+      assert.strictEqual(data.last_sync_time, 123456);
+    });
+
+    it('supports retrieving single key string, key array, and object defaults', async () => {
+      const mem = new MemoryStorageAdapter({
+        tags: ['Reading'],
+        items: [{ id: '1' }]
+      });
+
+      // String key
+      const single = await mem.get('tags');
+      assert.deepStrictEqual(single.tags, ['Reading']);
+
+      // Array of keys
+      const multiple = await mem.get(['tags', 'items', 'nonexistent']);
+      assert.deepStrictEqual(multiple.tags, ['Reading']);
+      assert.deepStrictEqual(multiple.items, [{ id: '1' }]);
+      assert.strictEqual(multiple.nonexistent, undefined);
+
+      // Object with defaults
+      const withDefaults = await mem.get({
+        tags: ['FallbackTag'],
+        theme: 'dark'
+      });
+      assert.deepStrictEqual(withDefaults.tags, ['Reading']);
+      assert.strictEqual(withDefaults.theme, 'dark');
+    });
+
+    it('supports remove and clear operations with onChanged notifications', async () => {
+      const mem = new MemoryStorageAdapter({
+        items: [{ id: '1' }],
+        tags: ['Tag1'],
+        searchEngines: [{ id: 'se-1' }]
+      });
+
+      let changedEvent = null;
+      mem.onChanged((changes) => {
+        changedEvent = changes;
+      });
+
+      await mem.remove('tags');
+      assert.deepStrictEqual(await mem.get('tags'), {});
+      assert.strictEqual(changedEvent.tags.oldValue[0], 'Tag1');
+      assert.strictEqual(changedEvent.tags.newValue, undefined);
+
+      await mem.clear();
+      const all = await mem.get(null);
+      assert.deepStrictEqual(all.items, []);
+      assert.deepStrictEqual(all.tags, []);
+      assert.deepStrictEqual(all.searchEngines, []);
+    });
+
+    it('acts as a single shared storage seam between CollectionStore and SearchEngineStore', async () => {
+      const sharedStorage = new MemoryStorageAdapter();
+      const collStore = new CollectionStore(sharedStorage);
+      const seStore = new SearchEngineStore(sharedStorage);
+
+      await collStore.saveItem({ title: 'Shared Item', url: 'https://shared.com' });
+      await seStore.saveEngine({ title: 'Shared Engine', urlTemplate: 'https://engine.com?q={query}' });
+
+      const all = await sharedStorage.get(['items', 'searchEngines']);
+      assert.strictEqual(all.items.length, 1);
+      assert.strictEqual(all.items[0].title, 'Shared Item');
+      assert.strictEqual(all.searchEngines.length, 1);
+      assert.strictEqual(all.searchEngines[0].title, 'Shared Engine');
+    });
+  });
+
+  describe('Unified Snapshot & Backup Management (Deep Store Interface)', () => {
+    let seStore;
+    let tabAdapter;
+
+    beforeEach(async () => {
+      seStore = new SearchEngineStore(adapter);
+      tabAdapter = new MemoryTabAdapter();
+      await seStore.load();
+    });
+
+    describe('validateSnapshot', () => {
+      it('validates a complete unified snapshot and returns detailed summary', () => {
+        const payload = {
+          version: 1,
+          items: [{ id: 'item-1', title: 'Example', url: 'https://example.com', tags: ['News'] }],
+          tags: ['News'],
+          searchEngines: [{ id: 'se-1', title: 'Google', urlTemplate: 'https://google.com?q={query}' }]
+        };
+
+        const result = CollectionStore.validateSnapshot(payload);
+        assert.strictEqual(result.valid, true);
+        assert.strictEqual(result.error, null);
+        assert.strictEqual(result.hasItems, true);
+        assert.strictEqual(result.hasTags, true);
+        assert.strictEqual(result.hasSearchEngines, true);
+        assert.strictEqual(result.counts.items, 1);
+        assert.strictEqual(result.counts.tags, 1);
+        assert.strictEqual(result.counts.searchEngines, 1);
+
+        // Instance method is also available
+        const instanceResult = store.validateSnapshot(payload);
+        assert.deepStrictEqual(instanceResult, result);
+      });
+
+      it('validates a legacy snapshot without searchEngines', () => {
+        const legacyPayload = {
+          items: [{ id: 'item-1', title: 'Legacy', url: 'https://legacy.com', tags: [] }],
+          tags: []
+        };
+
+        const result = CollectionStore.validateSnapshot(legacyPayload);
+        assert.strictEqual(result.valid, true);
+        assert.strictEqual(result.error, null);
+        assert.strictEqual(result.hasSearchEngines, false);
+        assert.strictEqual(result.counts.searchEngines, 0);
+      });
+
+      it('rejects invalid payloads with error message and valid=false', () => {
+        assert.strictEqual(CollectionStore.validateSnapshot(null).valid, false);
+        assert.strictEqual(CollectionStore.validateSnapshot(undefined).valid, false);
+        assert.strictEqual(CollectionStore.validateSnapshot('string').valid, false);
+        assert.strictEqual(CollectionStore.validateSnapshot(123).valid, false);
+        assert.strictEqual(CollectionStore.validateSnapshot([]).valid, false);
+        assert.strictEqual(CollectionStore.validateSnapshot({ items: [] }).valid, false);
+        assert.strictEqual(CollectionStore.validateSnapshot({ tags: [] }).valid, false);
+        assert.strictEqual(CollectionStore.validateSnapshot({ items: [], tags: [], searchEngines: 'not-array' }).valid, false);
+      });
+    });
+
+    describe('exportSnapshot', () => {
+      it('exports unified snapshot containing items, tags, and search engines with timestamp and version', async () => {
+        await store.addTag('Tech');
+        await store.saveItem({ title: 'Item 1', url: 'https://item1.com', tags: ['Tech'] });
+        await seStore.saveEngine({ title: 'SE 1', urlTemplate: 'https://se1.com?q={query}' });
+
+        const snapshot = await store.exportSnapshot(seStore);
+        assert.strictEqual(snapshot.version, 1);
+        assert.ok(typeof snapshot.timestamp === 'number');
+        assert.strictEqual(snapshot.items.length, 1);
+        assert.strictEqual(snapshot.items[0].title, 'Item 1');
+        assert.deepStrictEqual(snapshot.tags, ['Tech']);
+        assert.strictEqual(snapshot.searchEngines.length, 1);
+        assert.strictEqual(snapshot.searchEngines[0].title, 'SE 1');
+      });
+
+      it('creates deep copies preventing external mutation of store state', async () => {
+        await store.addTag('OriginalTag');
+        await seStore.saveEngine({ title: 'Original Engine', urlTemplate: 'https://ex.com?q={query}' });
+
+        const snapshot = await store.exportSnapshot(seStore);
+        snapshot.tags.push('HackedTag');
+        snapshot.searchEngines[0].title = 'Hacked Engine';
+
+        assert.deepStrictEqual(store.getTags(), ['OriginalTag']);
+        assert.strictEqual(seStore.getEngines()[0].title, 'Original Engine');
+      });
+
+      it('re-reads storage to prevent stale cache overwrite in multi-context scenarios', async () => {
+        // Direct write to adapter simulating another context (e.g. Background script or another window)
+        await adapter.set({
+          items: [{ id: 'direct-item', title: 'External Context Item', url: 'https://external.com', tags: [] }]
+        });
+
+        // store.items is currently empty in memory
+        const snapshot = await store.exportSnapshot(seStore);
+        assert.strictEqual(snapshot.items.length, 1);
+        assert.strictEqual(snapshot.items[0].title, 'External Context Item');
+      });
+    });
+
+    describe('restoreSnapshot', () => {
+      it('restores full dataset updating CollectionStore and SearchEngineStore', async () => {
+        const fullSnapshot = {
+          version: 1,
+          items: [{ id: 'res-1', title: 'Restored Item', url: 'https://res.com', tags: ['RTag'] }],
+          tags: ['RTag'],
+          searchEngines: [{ id: 'se-10', title: 'Restored Engine', urlTemplate: 'https://res-se.com?q={query}' }]
+        };
+
+        let collectionNotified = false;
+        let seNotified = false;
+        store.subscribe(() => { collectionNotified = true; });
+        seStore.subscribe(() => { seNotified = true; });
+
+        const result = await store.restoreSnapshot(fullSnapshot, { searchEngineStore: seStore });
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(result.restored.itemsCount, 1);
+        assert.strictEqual(result.restored.tagsCount, 1);
+        assert.strictEqual(result.restored.searchEnginesCount, 1);
+
+        assert.strictEqual(store.getItems().length, 1);
+        assert.strictEqual(store.getItemById('res-1')?.title, 'Restored Item');
+        assert.strictEqual(seStore.getEngines().length, 1);
+        assert.strictEqual(seStore.getEngineById('se-10')?.title, 'Restored Engine');
+
+        assert.strictEqual(collectionNotified, true);
+        assert.strictEqual(seNotified, true);
+      });
+
+      it('preserves existing search engines when restoring legacy snapshot', async () => {
+        await seStore.saveEngine({ id: 'stay', title: 'Keep Me', urlTemplate: 'https://keep.com?q={query}' });
+
+        const legacySnapshot = {
+          items: [{ id: 'leg-1', title: 'Legacy Item', url: 'https://leg.com', tags: [] }],
+          tags: []
+        };
+
+        const result = await store.restoreSnapshot(legacySnapshot, { searchEngineStore: seStore });
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(result.restored.searchEnginesCount, null);
+
+        assert.strictEqual(store.getItems().length, 1);
+        assert.strictEqual(seStore.getEngines().length, 1);
+        assert.strictEqual(seStore.getEngineById('stay')?.title, 'Keep Me');
+      });
+
+      it('overwrites search engines when searchEngines array is explicitly empty', async () => {
+        await seStore.saveEngine({ title: 'To Delete', urlTemplate: 'https://del.com' });
+
+        const snapshot = {
+          items: [],
+          tags: [],
+          searchEngines: []
+        };
+
+        const result = await store.restoreSnapshot(snapshot, { searchEngineStore: seStore });
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(result.restored.searchEnginesCount, 0);
+        assert.strictEqual(seStore.getEngines().length, 0);
+      });
+
+      it('rejects invalid payload and keeps existing data unmodified', async () => {
+        await store.addTag('SavedTag');
+        await seStore.saveEngine({ title: 'Saved Engine', urlTemplate: 'https://saved.com' });
+
+        const invalid = { items: 'bad', tags: [] };
+        const result = await store.restoreSnapshot(invalid, { searchEngineStore: seStore });
+
+        assert.strictEqual(result.success, false);
+        assert.strictEqual(store.getTags().length, 1);
+        assert.strictEqual(seStore.getEngines().length, 1);
+      });
+    });
+
+    describe('exportBackupFile', () => {
+      it('exports backup and triggers download via tabAdapter.downloadJson without duck-typing', async () => {
+        await store.addTag('TagX');
+        await seStore.saveEngine({ title: 'EngineX', urlTemplate: 'https://x.com?q={query}' });
+
+        const result = await store.exportBackupFile(tabAdapter, { filename: 'my_backup.json', searchEngineStore: seStore });
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(result.filename, 'my_backup.json');
+        assert.strictEqual(tabAdapter.downloads.length, 1);
+        assert.strictEqual(tabAdapter.downloads[0].filename, 'my_backup.json');
+        assert.deepStrictEqual(tabAdapter.downloads[0].data.tags, ['TagX']);
+        assert.strictEqual(tabAdapter.downloads[0].data.searchEngines.length, 1);
+      });
+
+      it('uses formatted date in default filename if filename is not provided', async () => {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const result = await store.exportBackupFile(tabAdapter, { searchEngineStore: seStore });
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(result.filename, `collection_backup_${todayStr}.json`);
+      });
+    });
+  });
+
+  describe('TabAdapter downloadJson Interface', () => {
+    it('MemoryTabAdapter provides downloadJson(data, filename) interface', async () => {
+      const tab = new MemoryTabAdapter();
+      const testData = { hello: 'world' };
+      const res = await tab.downloadJson(testData, 'test.json');
+
+      assert.strictEqual(res, true);
+      assert.strictEqual(tab.downloads.length, 1);
+      assert.strictEqual(tab.downloads[0].filename, 'test.json');
+      assert.deepStrictEqual(tab.downloads[0].data, testData);
+      assert.strictEqual(tab.downloads[0].mimeType, 'application/json');
+    });
+  });
+});

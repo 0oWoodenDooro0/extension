@@ -47,6 +47,18 @@ export class MemoryTabAdapter {
     this.downloads.push(record);
     return true;
   }
+
+  /**
+   * 序列化資料並下載 JSON 檔案 (與 BrowserTabAdapter 保持一致的直接介面)
+   */
+  async downloadJson(data, filename = 'backup.json') {
+    return this.download({
+      content: JSON.stringify(data, null, 2),
+      filename,
+      mimeType: 'application/json',
+      data
+    });
+  }
 }
 
 /**
