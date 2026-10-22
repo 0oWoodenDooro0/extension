@@ -1,8 +1,10 @@
 // pageCapture.js - 網頁擷取、封面圖解析與快速儲存深層模組 (Page Capture & Extraction Pipeline)
 // 統一 DOM 注入與 HTML Regex 雙重圖片擷取規則，並將分頁查詢與腳本執行收斂至 TabAdapter 接縫
 
-import { tabAdapter as defaultTabAdapter } from './tabAdapter.js';
+import { tabAdapter as defaultTabAdapter, inPageToast } from './tabAdapter.js';
 import { collectionStore } from './sidebar/store.js';
+
+export { inPageToast };
 
 /**
  * 安全解析絕對 URL
@@ -26,6 +28,7 @@ export function resolveUrl(rawUrl, baseUrl) {
 export function isIgnoredImage(src) {
   if (!src || typeof src !== 'string') return true;
   const s = src.toLowerCase().trim();
+  if (!s) return true;
   if (s.startsWith('data:')) return true;
   if (s.endsWith('.svg') || s.includes('.svg?') || s.includes('.svg#')) return true;
   if (s.includes('pixel') || s.includes('1x1') || s.includes('spacer')) return true;
@@ -49,28 +52,28 @@ export function extractImageFromHtml(htmlText, pageUrl) {
   // 1. og:image (property or name)
   const ogMatch = htmlText.match(/<meta\s+[^>]*(?:property|name)=["']og:image["'][^>]*content=["']([^"']+)["']/i) ||
                   htmlText.match(/<meta\s+[^>]*content=["']([^"']+)["'][^>]*(?:property|name)=["']og:image["']/i);
-  if (ogMatch && ogMatch[1]) {
+  if (ogMatch && ogMatch[1] && !isIgnoredImage(ogMatch[1])) {
     return resolveUrl(ogMatch[1].trim(), pageUrl);
   }
 
   // 2. twitter:image (name or property)
   const twitterMatch = htmlText.match(/<meta\s+[^>]*(?:name|property)=["']twitter:image["'][^>]*content=["']([^"']+)["']/i) ||
                        htmlText.match(/<meta\s+[^>]*content=["']([^"']+)["'][^>]*(?:name|property)=["']twitter:image["']/i);
-  if (twitterMatch && twitterMatch[1]) {
+  if (twitterMatch && twitterMatch[1] && !isIgnoredImage(twitterMatch[1])) {
     return resolveUrl(twitterMatch[1].trim(), pageUrl);
   }
 
   // 3. link rel="image_src"
   const imageSrcMatch = htmlText.match(/<link\s+[^>]*rel=["']image_src["'][^>]*href=["']([^"']+)["']/i) ||
                         htmlText.match(/<link\s+[^>]*href=["']([^"']+)["'][^>]*rel=["']image_src["']/i);
-  if (imageSrcMatch && imageSrcMatch[1]) {
+  if (imageSrcMatch && imageSrcMatch[1] && !isIgnoredImage(imageSrcMatch[1])) {
     return resolveUrl(imageSrcMatch[1].trim(), pageUrl);
   }
 
   // 4. link rel="apple-touch-icon"
   const appleIconMatch = htmlText.match(/<link\s+[^>]*rel=["']apple-touch-icon(?:-precomposed)?["'][^>]*href=["']([^"']+)["']/i) ||
                          htmlText.match(/<link\s+[^>]*href=["']([^"']+)["'][^>]*rel=["']apple-touch-icon(?:-precomposed)?["']/i);
-  if (appleIconMatch && appleIconMatch[1]) {
+  if (appleIconMatch && appleIconMatch[1] && !isIgnoredImage(appleIconMatch[1])) {
     return resolveUrl(appleIconMatch[1].trim(), pageUrl);
   }
 
@@ -93,6 +96,7 @@ export { resolveUrl as resolveImageUrl, extractImageFromHtml as extractOgImageFr
 
 /**
  * 在 DOM 環境下依 5 階段優先序擷取代表性封面圖
+ * (注意：此函式會被 chrome.scripting.executeScript 序列化注入至頁面，不可依賴外部模組變數)
  * @param {Document} [doc]
  * @returns {string|null}
  */
@@ -102,6 +106,7 @@ export function extractImageFromDom(doc = (typeof document !== 'undefined' ? doc
   function isIgnored(src, el) {
     if (!src || typeof src !== 'string') return true;
     const s = src.toLowerCase().trim();
+    if (!s) return true;
     if (s.startsWith('data:')) return true;
     if (s.endsWith('.svg') || s.includes('.svg?') || s.includes('.svg#')) return true;
     if (s.includes('pixel') || s.includes('1x1') || s.includes('spacer')) return true;
@@ -123,28 +128,30 @@ export function extractImageFromDom(doc = (typeof document !== 'undefined' ? doc
 
   // 1. og:image (property or name)
   const og = doc.querySelector('meta[property="og:image"], meta[name="og:image"]');
-  if (og && og.content && og.content.trim()) {
-    return resolve(og.content.trim());
+  const ogContent = og && (og.content || og.getAttribute?.('content'));
+  if (ogContent && !isIgnored(ogContent, og)) {
+    return resolve(ogContent.trim());
   }
 
   // 2. twitter:image (name or property)
   const twitter = doc.querySelector('meta[name="twitter:image"], meta[property="twitter:image"]');
-  if (twitter && twitter.content && twitter.content.trim()) {
-    return resolve(twitter.content.trim());
+  const twitterContent = twitter && (twitter.content || twitter.getAttribute?.('content'));
+  if (twitterContent && !isIgnored(twitterContent, twitter)) {
+    return resolve(twitterContent.trim());
   }
 
   // 3. link rel="image_src"
   const imageSrc = doc.querySelector('link[rel="image_src"]');
-  if (imageSrc && (imageSrc.href || imageSrc.getAttribute?.('href'))) {
-    const href = imageSrc.href || imageSrc.getAttribute('href');
-    if (href && href.trim()) return resolve(href.trim());
+  const imageSrcHref = imageSrc && (imageSrc.href || imageSrc.getAttribute?.('href'));
+  if (imageSrcHref && !isIgnored(imageSrcHref, imageSrc)) {
+    return resolve(imageSrcHref.trim());
   }
 
   // 4. link rel="apple-touch-icon"
   const appleIcon = doc.querySelector('link[rel="apple-touch-icon"], link[rel="apple-touch-icon-precomposed"]');
-  if (appleIcon && (appleIcon.href || appleIcon.getAttribute?.('href'))) {
-    const href = appleIcon.href || appleIcon.getAttribute('href');
-    if (href && href.trim()) return resolve(href.trim());
+  const appleIconHref = appleIcon && (appleIcon.href || appleIcon.getAttribute?.('href'));
+  if (appleIconHref && !isIgnored(appleIconHref, appleIcon)) {
+    return resolve(appleIconHref.trim());
   }
 
   // 5. first <img> that is not ignored
@@ -191,25 +198,34 @@ export async function fetchImageFromHtml(pageUrl, { fetchImpl = (typeof fetch !=
  * @param {Object} options 
  * @returns {Promise<string|null>}
  */
-export async function getImageForUrl(url, { tabAdapter = defaultTabAdapter, fetchImpl = (typeof fetch !== 'undefined' ? fetch : null) } = {}) {
+export async function getImageForUrl(url, {
+  tab = null,
+  tabAdapter = defaultTabAdapter,
+  fetchImpl = (typeof fetch !== 'undefined' ? fetch : null)
+} = {}) {
   if (!url) return null;
 
   // 1. 優先嘗試透過 tabAdapter 查詢已開啟分頁並執行 DOM 擷取
   try {
+    let matchedTab = null;
     if (tabAdapter && typeof tabAdapter.findTabByUrl === 'function') {
-      const matchedTab = await tabAdapter.findTabByUrl(url);
-      if (matchedTab && matchedTab.id && typeof tabAdapter.executeScript === 'function') {
-        try {
-          const results = await tabAdapter.executeScript({
-            target: { tabId: matchedTab.id },
-            func: extractImageFromDom
-          });
-          if (results && results[0] && results[0].result) {
-            return results[0].result;
-          }
-        } catch (err) {
-          // ignore tab script execution error and fallback to fetch
+      matchedTab = await tabAdapter.findTabByUrl(url);
+    }
+    if (!matchedTab && tab && tab.id && (!tab.url || tab.url === url)) {
+      matchedTab = tab;
+    }
+
+    if (matchedTab && matchedTab.id && tabAdapter && typeof tabAdapter.executeScript === 'function') {
+      try {
+        const results = await tabAdapter.executeScript({
+          target: { tabId: matchedTab.id },
+          func: extractImageFromDom
+        });
+        if (results && results[0] && results[0].result) {
+          return results[0].result;
         }
+      } catch (err) {
+        // ignore tab script execution error and fallback to fetch
       }
     }
   } catch (err) {
@@ -228,57 +244,6 @@ export async function getImageForUrl(url, { tabAdapter = defaultTabAdapter, fetc
 export function isValidWebUrl(url) {
   if (!url || typeof url !== 'string') return false;
   return url.startsWith('http://') || url.startsWith('https://');
-}
-
-/**
- * 注入至網頁 DOM 中的浮動 Toast 提示函式
- * @param {string} message 
- * @param {boolean} isExisting 
- */
-export function inPageToast(message, isExisting) {
-  const TOAST_ID = '__collection_ext_toast__';
-  const existingToast = document.getElementById(TOAST_ID);
-  if (existingToast) {
-    existingToast.remove();
-  }
-
-  const toast = document.createElement('div');
-  toast.id = TOAST_ID;
-  toast.innerText = message;
-
-  Object.assign(toast.style, {
-    position: 'fixed',
-    top: '20px',
-    right: '20px',
-    zIndex: '2147483647',
-    padding: '10px 18px',
-    background: isExisting ? 'rgba(30, 64, 175, 0.94)' : 'rgba(16, 185, 129, 0.94)',
-    backdropFilter: 'blur(8px)',
-    WebkitBackdropFilter: 'blur(8px)',
-    color: '#ffffff',
-    fontSize: '13px',
-    fontWeight: '500',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-    borderRadius: '8px',
-    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.1)',
-    transition: 'opacity 0.25s ease, transform 0.25s ease',
-    opacity: '0',
-    transform: 'translateY(-10px) scale(0.96)',
-    pointerEvents: 'none'
-  });
-
-  document.body.appendChild(toast);
-
-  requestAnimationFrame(() => {
-    toast.style.opacity = '1';
-    toast.style.transform = 'translateY(0) scale(1)';
-  });
-
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.transform = 'translateY(-10px) scale(0.96)';
-    setTimeout(() => toast.remove(), 260);
-  }, 2000);
 }
 
 /**
@@ -326,7 +291,7 @@ export async function captureTabMetadata(tab, {
 
   let imageUrl = existingItem && existingItem.imageUrl ? existingItem.imageUrl : null;
   if (!imageUrl && resolveCover) {
-    imageUrl = await getImageForUrl(tab.url, { tabAdapter, fetchImpl });
+    imageUrl = await getImageForUrl(tab.url, { tab, tabAdapter, fetchImpl });
   }
 
   return {

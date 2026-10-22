@@ -111,6 +111,7 @@ describe('Quick Save & Page Capture Feature (Deep Module)', () => {
     let store;
     let memoryTabAdapter;
     let tabAdapter;
+    const noopFetch = async () => ({ ok: false, text: async () => '' });
 
     beforeEach(async () => {
       adapter = new MemoryStorageAdapter();
@@ -129,7 +130,7 @@ describe('Quick Save & Page Capture Feature (Deep Module)', () => {
 
     it('returns error when tab has an invalid or internal URL', async () => {
       const tab = { id: 1, title: 'Extensions', url: 'chrome://extensions' };
-      const result = await quickSaveActiveTab({ tab, store, tabAdapter });
+      const result = await quickSaveActiveTab({ tab, store, tabAdapter, fetchImpl: noopFetch });
 
       assert.strictEqual(result.success, false);
       assert.strictEqual(result.reason, 'invalid_url');
@@ -172,7 +173,12 @@ describe('Quick Save & Page Capture Feature (Deep Module)', () => {
         title: 'Original Title',
         url: 'https://example.com/article'
       };
-      const initial = await quickSaveActiveTab({ tab: firstTab, store, tabAdapter });
+      const initial = await quickSaveActiveTab({
+        tab: firstTab,
+        store,
+        tabAdapter,
+        fetchImpl: noopFetch
+      });
       await store.saveItem({
         id: initial.item.id,
         title: initial.item.title,
@@ -188,7 +194,12 @@ describe('Quick Save & Page Capture Feature (Deep Module)', () => {
         title: 'Updated Title on Webpage',
         url: 'https://example.com/article'
       };
-      const result = await quickSaveActiveTab({ tab: updatedTab, store, tabAdapter });
+      const result = await quickSaveActiveTab({
+        tab: updatedTab,
+        store,
+        tabAdapter,
+        fetchImpl: noopFetch
+      });
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.isExisting, true);
@@ -215,7 +226,7 @@ describe('Quick Save & Page Capture Feature (Deep Module)', () => {
         url: 'https://example.com/direct'
       };
 
-      const result = await saveActiveTabDirectly(tab, store, { tabAdapter });
+      const result = await saveActiveTabDirectly(tab, store, { tabAdapter, fetchImpl: noopFetch });
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.item.title, 'Direct Save');
       assert.strictEqual(result.item.url, 'https://example.com/direct');

@@ -2,11 +2,67 @@
 // 封裝分頁查詢、相鄰位置插入 (openerTabId / index + 1)、批次開啟、腳本注入與檔案下載
 
 /**
+ * 注入至網頁 DOM 中的浮動 Toast 提示函式
+ * (必須維持純函式、零外部閉包依賴，以便透過 chrome.scripting.executeScript 序列化注入)
+ * @param {string} message 
+ * @param {boolean} isExisting 
+ */
+export function inPageToast(message, isExisting) {
+  const TOAST_ID = '__collection_ext_toast__';
+  const existingToast = document.getElementById(TOAST_ID);
+  if (existingToast) {
+    existingToast.remove();
+  }
+
+  const toast = document.createElement('div');
+  toast.id = TOAST_ID;
+  toast.innerText = message;
+
+  Object.assign(toast.style, {
+    position: 'fixed',
+    top: '20px',
+    right: '20px',
+    zIndex: '2147483647',
+    padding: '10px 18px',
+    background: isExisting ? 'rgba(30, 64, 175, 0.94)' : 'rgba(16, 185, 129, 0.94)',
+    backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)',
+    color: '#ffffff',
+    fontSize: '13px',
+    fontWeight: '500',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    borderRadius: '8px',
+    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.1)',
+    transition: 'opacity 0.25s ease, transform 0.25s ease',
+    opacity: '0',
+    transform: 'translateY(-10px) scale(0.96)',
+    pointerEvents: 'none'
+  });
+
+  document.body.appendChild(toast);
+
+  requestAnimationFrame(() => {
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateY(0) scale(1)';
+  });
+
+  const hideTimer = setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateY(-10px) scale(0.96)';
+    const removeTimer = setTimeout(() => toast.remove(), 260);
+    if (typeof removeTimer?.unref === 'function') removeTimer.unref();
+  }, 2000);
+  if (typeof hideTimer?.unref === 'function') hideTimer.unref();
+}
+
+/**
  * 記憶體分頁適配器 (適用於測試環境與無瀏覽器環境)
  */
 export class MemoryTabAdapter {
   constructor(initialData = {}) {
-    this.activeTab = initialData.activeTab !== undefined ? initialData.activeTab : null;
+    this.activeTab = initialData.activeTab !== undefined
+      ? initialData.activeTab
+      : (Array.isArray(initialData.tabs) ? (initialData.tabs.find(t => t.active) || null) : null);
     this.tabs = initialData.tabs
       ? [...initialData.tabs]
       : (this.activeTab ? [{ ...this.activeTab }] : []);
@@ -118,13 +174,17 @@ export class ChromeTabAdapter {
       return null;
     }
     return new Promise((resolve) => {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (chrome.runtime && chrome.runtime.lastError) {
-          resolve(null);
-        } else {
-          resolve(tabs && tabs.length > 0 ? tabs[0] : null);
-        }
-      });
+      try {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (chrome.runtime && chrome.runtime.lastError) {
+            resolve(null);
+          } else {
+            resolve(tabs && tabs.length > 0 ? tabs[0] : null);
+          }
+        });
+      } catch (e) {
+        resolve(null);
+      }
     });
   }
 
@@ -133,13 +193,17 @@ export class ChromeTabAdapter {
       return [];
     }
     return new Promise((resolve) => {
-      chrome.tabs.query(query, (tabs) => {
-        if (chrome.runtime && chrome.runtime.lastError) {
-          resolve([]);
-        } else {
-          resolve(tabs || []);
-        }
-      });
+      try {
+        chrome.tabs.query(query, (tabs) => {
+          if (chrome.runtime && chrome.runtime.lastError) {
+            resolve([]);
+          } else {
+            resolve(tabs || []);
+          }
+        });
+      } catch (e) {
+        resolve([]);
+      }
     });
   }
 
@@ -189,11 +253,12 @@ export class ChromeTabAdapter {
           color: isExisting ? '#2563EB' : '#10B981',
           tabId: tab.id
         });
-        setTimeout(() => {
+        const badgeTimer = setTimeout(() => {
           try {
             chrome.action.setBadgeText({ text: '', tabId: tab.id });
           } catch (e) {}
         }, 2000);
+        if (typeof badgeTimer?.unref === 'function') badgeTimer.unref();
       } catch (e) {}
     }
 
@@ -203,50 +268,9 @@ export class ChromeTabAdapter {
         const displayTitle = title ? (title.length > 32 ? title.slice(0, 32) + '...' : title) : 'Page';
         const msg = isExisting ? `✓ 已更新收藏：${displayTitle}` : `✓ 已收藏至 Collection：${displayTitle}`;
 
-        const toastFunc = function (message, existing) {
-          const TOAST_ID = '__collection_ext_toast__';
-          const prev = document.getElementById(TOAST_ID);
-          if (prev) prev.remove();
-
-          const toast = document.createElement('div');
-          toast.id = TOAST_ID;
-          toast.innerText = message;
-          Object.assign(toast.style, {
-            position: 'fixed',
-            top: '20px',
-            right: '20px',
-            zIndex: '2147483647',
-            padding: '10px 18px',
-            background: existing ? 'rgba(30, 64, 175, 0.94)' : 'rgba(16, 185, 129, 0.94)',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
-            color: '#ffffff',
-            fontSize: '13px',
-            fontWeight: '500',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-            borderRadius: '8px',
-            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.1)',
-            transition: 'opacity 0.25s ease, transform 0.25s ease',
-            opacity: '0',
-            transform: 'translateY(-10px) scale(0.96)',
-            pointerEvents: 'none'
-          });
-
-          document.body.appendChild(toast);
-          requestAnimationFrame(() => {
-            toast.style.opacity = '1';
-            toast.style.transform = 'translateY(0) scale(1)';
-          });
-          setTimeout(() => {
-            toast.style.opacity = '0';
-            toast.style.transform = 'translateY(-10px) scale(0.96)';
-            setTimeout(() => toast.remove(), 260);
-          }, 2000);
-        };
-
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
-          func: toastFunc,
+          func: inPageToast,
           args: [msg, isExisting]
         });
       } catch (e) {}

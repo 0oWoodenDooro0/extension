@@ -45,6 +45,7 @@ describe('Image Fetch & Extraction Pipeline (Deep Module)', () => {
       assert.strictEqual(isIgnoredImage('https://example.com/photo.webp'), false);
       assert.strictEqual(isIgnoredImage(null), true);
       assert.strictEqual(isIgnoredImage(''), true);
+      assert.strictEqual(isIgnoredImage('   '), true);
     });
   });
 
@@ -103,6 +104,14 @@ describe('Image Fetch & Extraction Pipeline (Deep Module)', () => {
       assert.strictEqual(extractImageFromHtml(html, 'https://example.com'), 'https://example.com/og.jpg');
     });
 
+    it('falls back to next stage when higher-priority stage has ignored image (.svg / 1x1 / pixel)', () => {
+      const html = `
+        <meta property="og:image" content="https://example.com/brand-logo.svg">
+        <meta name="twitter:image" content="https://example.com/valid-cover.jpg">
+      `;
+      assert.strictEqual(extractImageFromHtml(html, 'https://example.com'), 'https://example.com/valid-cover.jpg');
+    });
+
     it('returns null when no image can be found or input is empty', () => {
       assert.strictEqual(extractImageFromHtml('', 'https://example.com'), null);
       assert.strictEqual(extractImageFromHtml(null, 'https://example.com'), null);
@@ -125,10 +134,13 @@ describe('Image Fetch & Extraction Pipeline (Deep Module)', () => {
       assert.strictEqual(result, 'https://example.com/covers/og.jpg');
     });
 
-    it('filters ignored images when extracting from img elements in DOM', () => {
+    it('filters ignored images across meta tags and img elements in DOM', () => {
       const mockDoc = {
         baseURI: 'https://example.com/articles/',
-        querySelector: () => null,
+        querySelector: (selector) => {
+          if (selector.includes('og:image')) return { content: 'https://example.com/logo.svg' };
+          return null;
+        },
         querySelectorAll: (selector) => {
           if (selector.includes('img')) {
             return [
