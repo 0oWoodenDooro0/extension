@@ -65,7 +65,7 @@ export function isEngineModified(eng, baseEng) {
 }
 
 /**
- * 通用 2-Way 實體列表合併輔助函數
+ * 通用 2-Way 實體列表合併輔助函式
  */
 export function mergeEntityList2Way({
   localList = [],
@@ -100,7 +100,7 @@ export function mergeEntityList2Way({
 }
 
 /**
- * 通用 3-Way 實體列表合併輔助函數
+ * 通用 3-Way 實體列表合併輔助函式
  */
 export function mergeEntityList3Way({
   localList = [],
@@ -193,6 +193,37 @@ export function mergeEntityList3Way({
 }
 
 /**
+ * 通用實體列表合併入口 (當提供 baseList 時執行 3-Way Merge，否則退回 2-Way Merge)
+ */
+export function mergeEntityList({
+  localList = [],
+  cloudList = [],
+  baseList = null,
+  getKey = (item) => item.id || item.url,
+  getTimestamp = (item) => Number(item.updatedAt || item.addDate || 0),
+  isEqual = null,
+  isContentEqual = null
+} = {}) {
+  const eqFn = isEqual || isContentEqual || ((a, b) => JSON.stringify(a) === JSON.stringify(b));
+  if (Array.isArray(baseList)) {
+    return mergeEntityList3Way({
+      localList,
+      cloudList,
+      baseList,
+      getKey,
+      getTimestamp,
+      isContentEqual: eqFn
+    });
+  }
+  return mergeEntityList2Way({
+    localList,
+    cloudList,
+    getKey,
+    getTimestamp
+  });
+}
+
+/**
  * 比對兩份統一備份資料內容是否完全一致 (用於判斷是否有未同步變更)
  */
 export function isUnifiedDataEqual(dataA, dataB) {
@@ -246,7 +277,7 @@ export function isUnifiedDataEqual(dataA, dataB) {
  * 用於無基準快照 (首次同步或升級過渡) 時進行聯集保護，防止資料誤刪
  */
 export function twoWayMergeUnifiedData(localData, cloudData) {
-  const items = mergeEntityList2Way({
+  const items = mergeEntityList({
     localList: localData?.items || [],
     cloudList: cloudData?.items || [],
     getKey: (item) => item.id || item.url,
@@ -262,7 +293,7 @@ export function twoWayMergeUnifiedData(localData, cloudData) {
     }
   }
 
-  const searchEngines = mergeEntityList2Way({
+  const searchEngines = mergeEntityList({
     localList: localData?.searchEngines || [],
     cloudList: cloudData?.searchEngines || [],
     getKey: (eng) => eng.id || eng.urlTemplate,
@@ -285,13 +316,13 @@ export function threeWayMergeUnifiedData(localData, cloudData, baseData) {
     return twoWayMergeUnifiedData(localData, cloudData);
   }
 
-  const items = mergeEntityList3Way({
+  const items = mergeEntityList({
     localList: localData?.items || [],
     cloudList: cloudData?.items || [],
     baseList: baseData?.items || [],
     getKey: (item) => item.id || item.url,
     getTimestamp: (item) => Number(item.updatedAt || item.addDate || 0),
-    isContentEqual: isItemContentEqual
+    isEqual: isItemContentEqual
   });
 
   // Tags 3-way merge
@@ -315,13 +346,13 @@ export function threeWayMergeUnifiedData(localData, cloudData, baseData) {
     }
   }
 
-  const searchEngines = mergeEntityList3Way({
+  const searchEngines = mergeEntityList({
     localList: localData?.searchEngines || [],
     cloudList: cloudData?.searchEngines || [],
     baseList: baseData?.searchEngines || [],
     getKey: (eng) => eng.id || eng.urlTemplate,
     getTimestamp: (eng) => Number(eng.updatedAt || 0),
-    isContentEqual: isEngineContentEqual
+    isEqual: isEngineContentEqual
   });
 
   return {
@@ -785,6 +816,9 @@ export class SyncCoordinator {
 
   /**
    * 執行同步：讀取雲端、比對合併 (Smart 3-Way Merge)、更新本地、推回雲端
+   * 具備 Single-Flight 防重入鎖定，若同步期間有新請求將自動排隊接續執行
+   * @param {Object} [options]
+   * @returns {Promise<{ success: boolean, stats?: Object, error?: string }>}
    */
   async sync(options = {}) {
     if (this._autoSyncTimer) {
@@ -836,11 +870,19 @@ export class SyncCoordinator {
     this._setStatus(SYNC_STATUS.SYNCING, 'Checking cloud backup...');
 
     try {
+      if (this.storage) {
+        const storedState = await this.storage.get(['last_sync_base']);
+        if (storedState && storedState.last_sync_base !== undefined) {
+          this.baseData = storedState.last_sync_base || null;
+        }
+      }
+
+      // 1. 檢查雲端是否有舊有備份檔案
       const cloudFile = await this.cloudAdapter.findFile();
 
-      const localData = await createUnifiedBackup(this.collectionStore, this.searchEngineStore);
-
       if (!cloudFile) {
+        // 雲端無檔案：取得本地最新資料並推送至雲端
+        const localData = await createUnifiedBackup(this.collectionStore, this.searchEngineStore);
         this._setStatus(SYNC_STATUS.SYNCING, 'Uploading initial backup to cloud...');
         const uploadResult = await this.cloudAdapter.uploadJson(localData);
 
@@ -860,10 +902,18 @@ export class SyncCoordinator {
         };
       }
 
+      // 2. 雲端有檔案：下載內容並校驗格式
       this._setStatus(SYNC_STATUS.SYNCING, 'Downloading cloud data...');
       const cloudData = await this.cloudAdapter.downloadJson(cloudFile.id);
-      validateBackupPayload(cloudData);
+      const validation = validateBackupPayload(cloudData);
+      if (!validation.valid) {
+        throw new Error(`Cloud data corrupted or invalid format: ${validation.error}`);
+      }
 
+      // 3. 在網路請求完成後，立即讀取當前「最新、最即時」的本地快照（避免網路請求期間使用者新增的資料被覆寫）
+      const localData = await createUnifiedBackup(this.collectionStore, this.searchEngineStore);
+
+      // 4. 智慧三向合併 (Smart 3-Way Merge)
       const mergedData = mergeUnifiedData(localData, cloudData, this.baseData);
 
       const localNeedsUpdate = !isUnifiedDataEqual(localData, mergedData);

@@ -8,6 +8,7 @@ import {
   mergeUnifiedData,
   threeWayMergeUnifiedData,
   twoWayMergeUnifiedData,
+  mergeEntityList,
   isUnifiedDataEqual,
   bindClientLifecycle,
   SYNC_STATUS
@@ -305,6 +306,29 @@ test('Google Drive Sync & Coordinator Test Suite', async (t) => {
     assert.equal(collStoreA.getItems().length, 1);
   });
 
+  await t.test('SyncCoordinator - Rejects corrupted or invalid cloud backup payload', async () => {
+    const gdrive = new MemoryGoogleDriveAdapter({
+      [DEFAULT_SYNC_FILENAME]: { invalid: true } // missing items and tags arrays
+    });
+    gdrive.setMockAuth({ token: 'mock-token' });
+
+    const collStore = new CollectionStore(new CollectionMemoryAdapter());
+    const seStore = new SearchEngineStore(new SearchMemoryAdapter());
+    await collStore.load();
+    await seStore.load();
+
+    const coordinator = new SyncCoordinator({
+      cloudAdapter: gdrive,
+      collectionStore: collStore,
+      searchEngineStore: seStore
+    });
+
+    const res = await coordinator.sync();
+    assert.equal(res.success, false);
+    assert.match(res.error, /Cloud data corrupted or invalid format/i);
+    assert.equal(coordinator.status, SYNC_STATUS.ERROR);
+  });
+
   await t.test('SyncCoordinator - Handles unauthenticated state cleanly', async () => {
     const gdrive = new MemoryGoogleDriveAdapter(); // no mock auth
     const collStore = new CollectionStore(new CollectionMemoryAdapter());
@@ -537,7 +561,7 @@ test('Google Drive Sync & Coordinator Test Suite', async (t) => {
       const adapter = new GoogleDriveAdapter({
         clientId: 'my-client-id.apps.googleusercontent.com',
         storage: mockStorage,
-        identity: mockIdentity,
+        identityImpl: mockIdentity,
         fetchImpl: mockFetch
       });
 

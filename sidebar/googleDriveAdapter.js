@@ -188,12 +188,13 @@ export class GoogleDriveAdapter {
    * @param {string} [options.clientId] - Google OAuth2 Client ID
    * @param {Object} [options.storage] - Storage adapter for caching auth tokens
    * @param {Object} [options.identity] - Chrome identity seam
+   * @param {Object} [options.identityImpl] - Alias for Chrome identity seam
    * @param {Function} [options.fetchImpl] - Injected fetch seam for Node.js / testing
    */
-  constructor({ clientId = '', storage = null, identity = null, fetchImpl = null } = {}) {
+  constructor({ clientId = '', storage = null, identity = null, identityImpl = null, fetchImpl = null } = {}) {
     this.clientId = clientId;
     this.storage = storage;
-    this.identity = identity || (typeof chrome !== 'undefined' ? chrome.identity : null);
+    this.identity = identity || identityImpl || (typeof chrome !== 'undefined' ? chrome.identity : null);
     this.fetchImpl = fetchImpl;
     this.cachedToken = null;
     this.cachedUser = null;
@@ -567,7 +568,8 @@ export class GoogleDriveAdapter {
   /**
    * 下載 appDataFolder 檔案 JSON 內容
    * @param {string} fileId 
-   * @returns {Promise<any>}\n   */
+   * @returns {Promise<any>}
+   */
   async downloadJson(fileId) {
     const url = `${GDRIVE_API_BASE}/files/${encodeURIComponent(fileId)}?alt=media`;
     const res = await this._fetchWithAuth(url);
@@ -583,7 +585,8 @@ export class GoogleDriveAdapter {
    * 上傳或更新 JSON 資料至 appDataFolder
    * @param {Object} data 
    * @param {string} [filename] 
-   * @returns {Promise<{ id: string, name: string, modifiedTime: string }>}\n   */
+   * @returns {Promise<{ id: string, name: string, modifiedTime: string }>}
+   */
   async uploadJson(data, filename = DEFAULT_SYNC_FILENAME) {
     const existingFile = await this.findFile(filename);
     const jsonContent = JSON.stringify(data, null, 2);

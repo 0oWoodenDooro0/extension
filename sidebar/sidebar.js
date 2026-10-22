@@ -39,7 +39,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   syncCoordinator.bindLifecycle({ portName: 'sidebar-lifecycle' });
 
   initCloudSyncView({
-    googleDriveAdapter,
     syncCoordinator,
     onSyncComplete: () => {
       displayMainLibrary();
