@@ -188,12 +188,12 @@ export class CollectionStore {
     this.unsubscribeStorage = this.adapter.onChanged((changes) => {
       if (this.isPersisting) return;
       let changed = false;
-      if (changes.items && changes.items.newValue) {
-        this.items = changes.items.newValue;
+      if (changes.items) {
+        this.items = Array.isArray(changes.items.newValue) ? changes.items.newValue : [];
         changed = true;
       }
-      if (changes.tags && changes.tags.newValue) {
-        this.tags = changes.tags.newValue;
+      if (changes.tags) {
+        this.tags = Array.isArray(changes.tags.newValue) ? changes.tags.newValue : [];
         changed = true;
       }
       if (changed) {

@@ -26,8 +26,8 @@ export class SearchEngineStore {
     // 監聽外部/多視窗同步
     this.unsubscribeStorage = this.adapter.onChanged((changes) => {
       if (this.isPersisting) return;
-      if (changes.searchEngines && changes.searchEngines.newValue) {
-        this.engines = changes.searchEngines.newValue;
+      if (changes.searchEngines) {
+        this.engines = Array.isArray(changes.searchEngines.newValue) ? changes.searchEngines.newValue : [];
         this.notify({ type: 'sync', source: 'external' });
       }
     });

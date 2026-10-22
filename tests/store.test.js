@@ -543,6 +543,12 @@ describe('CollectionStore (Deep Module)', () => {
       assert.strictEqual(all.items[0].title, 'Shared Item');
       assert.strictEqual(all.searchEngines.length, 1);
       assert.strictEqual(all.searchEngines[0].title, 'Shared Engine');
+
+      // Clearing shared storage resets in-memory state of both stores via onChanged
+      await sharedStorage.clear();
+      assert.deepStrictEqual(collStore.getItems(), []);
+      assert.deepStrictEqual(collStore.getTags(), []);
+      assert.deepStrictEqual(seStore.getEngines(), []);
     });
   });
 

@@ -47,104 +47,80 @@ document.addEventListener('DOMContentLoaded', async () => {
   const handleCloseFlush = () => {
     if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
       try {
-        chrome.runtime.sendMessage({ action: 'flushPendingSync' }, () => {
-          // Ignore response or lastError during unload
-          if (chrome.runtime.lastError) {}
+        chrome.runtime.sendMessage({ action: 'flushSync' }, () => {
+          if (chrome.runtime.lastError) {
+            syncCoordinator.flushPendingSync().catch(() => {});
+          }
         });
+        return;
       } catch {
-        // ignore
+        // fallback below
       }
     }
+    syncCoordinator.flushPendingSync().catch(() => {});
   };
 
   window.addEventListener('pagehide', handleCloseFlush);
-  window.addEventListener('beforeunload', handleCloseFlush);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       handleCloseFlush();
     }
   });
 
-  // 接收背景發出的同步完成通知，並即時更新側邊欄視圖
-  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
-    chrome.runtime.onMessage.addListener((message) => {
-      if (message && message.action === 'syncCompleted') {
-        collectionStore.load().then(() => {
-          if (currentViewName === 'manage') {
-            displayManageTagList();
-          } else if (currentViewName === 'items') {
-            refreshItemsList();
-          }
-        }).catch(() => {});
-      }
-    });
-  }
-
-  // --- View States ---
-  let currentViewName = 'items'; // 'items' | 'add' | 'manage'
-
-  // --- Initialize Sub-views ---
-  initItemsView({
-    collectionStore,
-    searchEngineStore,
-    tabAdapter,
-    onEditItem: (item) => {
-      showView(addItemView);
-      currentViewName = 'add';
-      showAddItemView({ item });
-    }
-  });
-
-  initAddItemView({
-    collectionStore,
-    tabAdapter,
-    onSaveSuccess: () => {
-      handleAddEditFinished();
-    },
-    onCancel: () => {
-      displayMainLibrary();
-    }
-  });
-
-  initManageTagsView({
-    collectionStore,
-    onBack: () => {
-      displayMainLibrary();
-    }
-  });
-
   initCloudSyncView({
-    syncCoordinator
+    googleDriveAdapter,
+    syncCoordinator,
+    onSyncComplete: () => {
+      displayMainLibrary();
+    },
+    onClose: () => {}
   });
 
-  // --- Toolbar Event Listeners ---
-  if (addItemButton) {
-    addItemButton.addEventListener('click', () => {
-      showView(addItemView);
-      currentViewName = 'add';
-      showAddItemView({ item: null });
-    });
-  }
+  // --- Global Controller State ---
+  let currentViewName = 'items'; // 'items', 'add', 'manage'
 
+  // --- Initialization ---
+
+  // 1. 初始化項目列表視圖
+  initItemsView({
+    onEditItem: (itemId) => {
+      showView(addItemView);
+      showAddItemView(itemId); // 進入編輯模式
+    }
+  });
+
+  // 2. 初始化新增/編輯視圖
+  initAddItemView({
+    onSave: () => handleAddEditFinished(),
+    onCancel: () => handleAddEditFinished(),
+    onDelete: () => handleAddEditFinished()
+  });
+
+  // 3. 初始化標籤管理視圖
+  initManageTagsView({
+    onClose: () => {
+      displayMainLibrary(); // 關閉管理介面，回到主頁
+    }
+  });
+
+  // --- Event Listeners (Main Navigation) ---
   if (manageTagsButton) {
     manageTagsButton.addEventListener('click', () => {
       showView(manageTagsView);
-      currentViewName = 'manage';
       showManageTagsView();
     });
   }
 
-  if (exportButton) {
-    exportButton.addEventListener('click', exportData);
+  if (addItemButton) {
+    addItemButton.addEventListener('click', () => {
+      showView(addItemView);
+      showAddItemView(null); // 進入新增模式
+    });
   }
 
-  if (importButton) {
-    importButton.addEventListener('click', () => fileInput && fileInput.click());
-  }
-
-  if (fileInput) {
-    fileInput.addEventListener('change', importData);
-  }
+  if (exportButton) exportButton.addEventListener('click', exportData);
+  if (importButton) importButton.addEventListener('click', () => fileInput && fileInput.click());
+  if (fileInput) fileInput.addEventListener('change', importData);
 
   // --- Navigation Logic ---
 
