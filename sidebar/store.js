@@ -1,6 +1,8 @@
 // store.js - 深度資料模組 (Deep Collection Module)
 // 封裝所有項目 CRUD、標籤串聯異動、項目去重、ID/時間戳生成與儲存持久化、以及側邊欄 Active Filter 狀態
 
+import { parseActorInput } from './chipHelper.js';
+
 export const UNTAGGED_TAG = '_UNTAGGED_';
 
 let idCounter = 0;
@@ -381,11 +383,12 @@ export class CollectionStore {
 
   addActorFilter(actorInput) {
     if (!actorInput) return;
-    const items = Array.isArray(actorInput) ? actorInput : actorInput.split(',');
-    items.forEach(raw => {
-      const trimmed = (raw || '').trim();
-      if (trimmed && !this._filterState.activeActors.includes(trimmed)) {
-        this._filterState.activeActors.push(trimmed);
+    const parsed = Array.isArray(actorInput)
+      ? actorInput.flatMap(item => parseActorInput(item))
+      : parseActorInput(actorInput);
+    parsed.forEach(actor => {
+      if (!this._filterState.activeActors.includes(actor)) {
+        this._filterState.activeActors.push(actor);
       }
     });
   }

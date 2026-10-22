@@ -1,6 +1,5 @@
-import { initializeSearchShortcuts } from './searchEngineStore.js';
+import { searchEngineStore, initializeSearchShortcuts } from './searchEngineStore.js';
 import { collectionStore, ChromeStorageAdapter } from './sidebar/store.js';
-import { searchEngineStore } from './searchEngineStore.js';
 import { GoogleDriveAdapter } from './sidebar/googleDriveAdapter.js';
 import { SyncCoordinator } from './sidebar/syncCoordinator.js';
 
@@ -284,7 +283,7 @@ export function isValidWebUrl(url) {
 }
 
 /**
- * 注入至網頁 DOM 中的浮動 Toast 提示函式
+ * 注入至網頁 DOM 中的浮動 Toast 提示函數
  * @param {string} message 
  * @param {boolean} isExisting 
  */

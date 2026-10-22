@@ -29,6 +29,7 @@ export function parseActorInput(input) {
  * @param {(actor: string) => void} options.onRemove - 點擊刪除按鈕時的回呼
  * @param {string} [options.removeButtonClass='remove-actor-filter'] - 刪除按鈕樣式 class
  * @param {string} [options.removeTitle='Remove actor filter'] - 刪除按鈕 title
+ * @param {boolean} [options.hideWhenEmpty=true] - 清單為空時是否隱藏容器
  */
 export function renderActorChips(
   container,
@@ -36,14 +37,17 @@ export function renderActorChips(
   {
     onRemove,
     removeButtonClass = 'remove-actor-filter',
-    removeTitle = 'Remove actor filter'
+    removeTitle = 'Remove actor filter',
+    hideWhenEmpty = true
   } = {}
 ) {
   if (!container) return;
   container.innerHTML = '';
 
   if (!actors || actors.length === 0) {
-    container.style.display = 'none';
+    if (hideWhenEmpty) {
+      container.style.display = 'none';
+    }
     return;
   }
 

@@ -17,7 +17,7 @@ let urlDebounceTimer = null;
 
 /**
  * 初始化新增/編輯視圖
- * @param {Object} injectedCallbacks - 回呼函數 { onSave, onCancel, onDelete }
+ * @param {Object} injectedCallbacks - 回調函數 { onSave, onCancel, onDelete }
  */
 export function initAddItemView(injectedCallbacks) {
   callbacks = injectedCallbacks;
@@ -305,6 +305,7 @@ function renderActorChipsView() {
   renderActorChips(selectedActorsContainer, currentEditingActors, {
     removeButtonClass: 'remove-actor',
     removeTitle: 'Remove actor',
+    hideWhenEmpty: false,
     onRemove: (actor) => {
       currentEditingActors = currentEditingActors.filter(a => a !== actor);
       renderActorChipsView();

@@ -115,7 +115,7 @@ function setupListEventDelegation() {
 export function displayItemsByTag(tag) {
   if (tag === 'All Items') {
     collectionStore.setAllItemsFilter();
-  } else {
+  } else if (tag) {
     collectionStore.toggleTagFilter(tag);
   }
   populateTagFilterBar();

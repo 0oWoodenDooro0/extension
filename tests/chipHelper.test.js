@@ -69,11 +69,17 @@ describe('ChipHelper (Shared View Helper)', () => {
       };
     }
 
-    it('hides container when actor list is empty', () => {
+    it('hides container when actor list is empty by default, and respects hideWhenEmpty: false', () => {
       const container = createMockContainer();
       renderActorChips(container, [], { onRemove: () => {} });
       assert.strictEqual(container.style.display, 'none');
       assert.strictEqual(container.innerHTML, '');
+
+      const visibleContainer = createMockContainer();
+      visibleContainer.style.display = 'flex';
+      renderActorChips(visibleContainer, [], { hideWhenEmpty: false, onRemove: () => {} });
+      assert.strictEqual(visibleContainer.style.display, 'flex');
+      assert.strictEqual(visibleContainer.innerHTML, '');
     });
 
     it('renders chips with name and remove button, and handles removal', () => {

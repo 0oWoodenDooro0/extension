@@ -539,6 +539,25 @@ describe('CollectionStore (Deep Module)', () => {
       assert.strictEqual(store.isTagActive('All Items'), true);
     });
 
+    it('cascades renameTag and deleteTag onto active tag filters', async () => {
+      await store.addTag('Frontend');
+      await store.addTag('JavaScript');
+
+      store.toggleTagFilter('Frontend');
+      store.toggleTagFilter('JavaScript');
+      assert.deepStrictEqual(store.getActiveTags(), ['Frontend', 'JavaScript']);
+
+      // Rename active tag
+      await store.renameTag('Frontend', 'UI');
+      assert.deepStrictEqual(store.getActiveTags(), ['UI', 'JavaScript']);
+      assert.strictEqual(store.getFilteredItems().length, 1);
+
+      // Delete active tag
+      await store.deleteTag('UI');
+      assert.deepStrictEqual(store.getActiveTags(), ['JavaScript']);
+      assert.strictEqual(store.getFilteredItems().length, 2);
+    });
+
     it('getFilteredItems and getRandomFilteredItem query via active filter state', () => {
       // 1. Initial All Items
       let items = store.getFilteredItems();

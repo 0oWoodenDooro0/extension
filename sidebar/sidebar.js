@@ -7,7 +7,7 @@ import { SyncCoordinator } from './syncCoordinator.js';
 import { initCloudSyncView } from './cloudSyncView.js';
 import { initItemsView, displayItemsByTag, refreshItemsList } from './itemsView.js';
 import { initAddItemView, showAddItemView } from './addItemView.js';
-import { initManageTagsView, showManageTagsView, displayManageTagList } from './manageTagsView.js';
+import { initManageTagsView, displayManageTagList } from './manageTagsView.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
   // --- Elements (Layout) ---
@@ -108,7 +108,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (manageTagsButton) {
     manageTagsButton.addEventListener('click', () => {
       showView(manageTagsView);
-      showManageTagsView();
+      displayManageTagList();
     });
   }
 
@@ -139,7 +139,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function displayMainLibrary() {
     showView(itemsView);
-    displayItemsByTag("All Items");
+    displayItemsByTag();
   }
 
   function handleAddEditFinished() {
