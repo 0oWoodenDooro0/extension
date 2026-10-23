@@ -1,0 +1,9 @@
+{
+  "name": "browser-collection-search-extension",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-timeout=1000 --import ./tests/setup.js tests/*.test.js"
+  }
+}
