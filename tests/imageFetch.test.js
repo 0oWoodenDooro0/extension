@@ -1,85 +1,116 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractOgImageFromHtml, resolveImageUrl } from '../background.js';
+import { extractImageFromHtml, resolveUrl } from '../background.js';
 
-describe('Image Fetch & og:image Extraction', () => {
-  describe('resolveImageUrl', () => {
-    it('returns full absolute URL unchanged', () => {
-      const result = resolveImageUrl('https://example.com/img.jpg', 'https://example.com/page');
-      assert.strictEqual(result, 'https://example.com/img.jpg');
-    });
-
-    it('resolves root-relative paths with base URL', () => {
-      const result = resolveImageUrl('/assets/cover.png', 'https://example.com/articles/news');
-      assert.strictEqual(result, 'https://example.com/assets/cover.png');
-    });
-
-    it('resolves relative paths with base URL', () => {
-      const result = resolveImageUrl('cover.jpg', 'https://example.com/articles/news/');
-      assert.strictEqual(result, 'https://example.com/articles/news/cover.jpg');
-    });
-
-    it('resolves protocol-relative URLs with base URL scheme', () => {
-      const result = resolveImageUrl('//cdn.example.com/image.jpg', 'https://example.com');
-      assert.strictEqual(result, 'https://cdn.example.com/image.jpg');
+describe('Cover Image Extraction & URL Resolution', () => {
+  describe('resolveUrl', () => {
+    it('resolves absolute, root-relative, path-relative, and protocol-relative URLs against base URL', () => {
+      assert.strictEqual(
+        resolveUrl('https://example.com/img.jpg', 'https://example.com/page'),
+        'https://example.com/img.jpg'
+      );
+      assert.strictEqual(
+        resolveUrl('/assets/cover.png', 'https://example.com/articles/news'),
+        'https://example.com/assets/cover.png'
+      );
+      assert.strictEqual(
+        resolveUrl('cover.jpg', 'https://example.com/articles/news/'),
+        'https://example.com/articles/news/cover.jpg'
+      );
+      assert.strictEqual(
+        resolveUrl('//cdn.example.com/image.jpg', 'https://example.com'),
+        'https://cdn.example.com/image.jpg'
+      );
     });
   });
 
-  describe('extractOgImageFromHtml', () => {
-    it('extracts og:image when property comes before content', () => {
-      const html = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <meta property="og:title" content="Test Page">
-          <meta property="og:image" content="https://example.com/image1.jpg">
-        </head>
-        <body></body>
-        </html>
+  describe('extractImageFromHtml priority chain', () => {
+    it('prioritizes og:image regardless of attribute order or property/name attribute', () => {
+      const htmlPropertyFirst = `
+        <html><head>
+          <meta property="og:image" content="/og-first.jpg">
+          <meta name="twitter:image" content="/twitter.jpg">
+        </head></html>
       `;
-      const extracted = extractOgImageFromHtml(html, 'https://example.com');
-      assert.strictEqual(extracted, 'https://example.com/image1.jpg');
-    });
+      assert.strictEqual(
+        extractImageFromHtml(htmlPropertyFirst, 'https://example.com/post'),
+        'https://example.com/og-first.jpg'
+      );
 
-    it('extracts og:image when content comes before property', () => {
-      const html = `
-        <html>
-        <head>
-          <meta content="https://example.com/image2.png" property="og:image" />
-        </head>
-        </html>
+      const htmlContentFirst = `
+        <html><head>
+          <meta content="https://example.com/og-reverse.png" name="og:image" />
+        </head></html>
       `;
-      const extracted = extractOgImageFromHtml(html, 'https://example.com');
-      assert.strictEqual(extracted, 'https://example.com/image2.png');
+      assert.strictEqual(
+        extractImageFromHtml(htmlContentFirst, 'https://example.com'),
+        'https://example.com/og-reverse.png'
+      );
     });
 
-    it('extracts og:image with name attribute instead of property', () => {
+    it('falls back to twitter:image when og:image is absent', () => {
       const html = `
-        <html>
-        <head>
-          <meta name="og:image" content="https://example.com/image3.jpg" />
-        </head>
-        </html>
+        <html><head>
+          <meta name="twitter:image" content="/images/twitter-card.webp">
+          <link rel="image_src" href="/images/link-src.jpg">
+        </head></html>
       `;
-      const extracted = extractOgImageFromHtml(html, 'https://example.com');
-      assert.strictEqual(extracted, 'https://example.com/image3.jpg');
+      assert.strictEqual(
+        extractImageFromHtml(html, 'https://example.com/blog/1'),
+        'https://example.com/images/twitter-card.webp'
+      );
     });
 
-    it('resolves relative og:image URLs to absolute URLs', () => {
-      const html = `<meta property="og:image" content="/covers/main.jpg">`;
-      const extracted = extractOgImageFromHtml(html, 'https://mysite.org/posts/100');
-      assert.strictEqual(extracted, 'https://mysite.org/covers/main.jpg');
+    it('falls back to link[rel="image_src"] then link[rel="apple-touch-icon"]', () => {
+      const htmlWithImageSrc = `
+        <html><head>
+          <link href="/thumb.jpg" rel="image_src">
+          <link rel="apple-touch-icon" href="/apple-icon.png">
+        </head></html>
+      `;
+      assert.strictEqual(
+        extractImageFromHtml(htmlWithImageSrc, 'https://example.com'),
+        'https://example.com/thumb.jpg'
+      );
+
+      const htmlWithAppleIcon = `
+        <html><head>
+          <link rel="apple-touch-icon" href="/apple-icon.png">
+        </head></html>
+      `;
+      assert.strictEqual(
+        extractImageFromHtml(htmlWithAppleIcon, 'https://example.com'),
+        'https://example.com/apple-icon.png'
+      );
     });
 
-    it('returns null when no og:image tag is present', () => {
-      const html = `<html><head><title>No image</title></head></html>`;
-      assert.strictEqual(extractOgImageFromHtml(html, 'https://example.com'), null);
+    it('falls back to the first qualifying <img> while skipping data:, .svg, pixel, and 1x1 tracking images', () => {
+      const html = `
+        <html><body>
+          <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">
+          <img src="/icons/logo.svg">
+          <img src="https://tracker.example.com/pixel.gif">
+          <img src="/ads/spacer-1x1.png">
+          <img src="/content/hero-photo.jpg">
+          <img src="/content/second-photo.jpg">
+        </body></html>
+      `;
+      assert.strictEqual(
+        extractImageFromHtml(html, 'https://example.com/article'),
+        'https://example.com/content/hero-photo.jpg'
+      );
     });
 
-    it('returns null for empty or invalid inputs', () => {
-      assert.strictEqual(extractOgImageFromHtml('', 'https://example.com'), null);
-      assert.strictEqual(extractOgImageFromHtml(null, 'https://example.com'), null);
+    it('returns null when no qualifying image exists or input is invalid', () => {
+      const htmlOnlyExcluded = `
+        <html><body>
+          <img src="data:image/png;base64,AAA">
+          <img src="/icon.svg">
+        </body></html>
+      `;
+      assert.strictEqual(extractImageFromHtml(htmlOnlyExcluded, 'https://example.com'), null);
+      assert.strictEqual(extractImageFromHtml('', 'https://example.com'), null);
+      assert.strictEqual(extractImageFromHtml(null, 'https://example.com'), null);
     });
   });
 });

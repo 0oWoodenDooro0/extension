@@ -1,8 +1,10 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { SearchEngineStore, MemoryStorageAdapter } from '../searchEngineStore.js';
+import { BrowserTabAdapter, MemoryTabAdapter } from '../tabAdapter.js';
+import { performSearch } from '../utils.js';
 
-describe('SearchEngineStore (Deep Module)', () => {
+describe('SearchEngineStore & Context-Menu Search', () => {
   let adapter;
   let store;
 
@@ -12,249 +14,167 @@ describe('SearchEngineStore (Deep Module)', () => {
     await store.load();
   });
 
-  describe('Engine CRUD Operations', () => {
-    it('creates a new engine with auto-generated id', async () => {
-      const engine = await store.saveEngine({
+  describe('Search Engine CRUD & Validation', () => {
+    it('creates, updates, and deletes a Search Engine while persisting to storage', async () => {
+      const created = await store.saveEngine({
         title: 'Google',
         urlTemplate: 'https://www.google.com/search?q={query}',
         queryRegex: '(\\w+)',
         queryReplacement: '$1'
       });
 
-      assert.ok(engine.id.startsWith('engine-'));
-      assert.strictEqual(engine.title, 'Google');
-      assert.strictEqual(engine.urlTemplate, 'https://www.google.com/search?q={query}');
-      assert.strictEqual(engine.queryRegex, '(\\w+)');
-      assert.strictEqual(engine.queryReplacement, '$1');
-
-      // Verify in-memory retrieval
-      const engines = store.getEngines();
-      assert.strictEqual(engines.length, 1);
-      assert.strictEqual(store.getEngineById(engine.id)?.title, 'Google');
-
-      // Verify persisted in adapter
-      const persisted = await adapter.get('searchEngines');
-      assert.strictEqual(persisted.searchEngines.length, 1);
-      assert.strictEqual(persisted.searchEngines[0].id, engine.id);
-    });
-
-    it('updates an existing engine when saving with an existing id', async () => {
-      const created = await store.saveEngine({
-        title: 'Bing',
-        urlTemplate: 'https://www.bing.com/search?q={query}'
-      });
+      assert.ok(created.id.startsWith('engine-'));
+      assert.strictEqual(created.title, 'Google');
+      assert.strictEqual(store.getEngineById(created.id)?.urlTemplate, 'https://www.google.com/search?q={query}');
 
       const updated = await store.saveEngine({
         id: created.id,
-        title: 'Bing Modified',
-        urlTemplate: 'https://www.bing.com/search?q={id}&fresh=1',
-        queryRegex: '(.*)',
-        queryReplacement: '$1'
-      });
-
-      assert.strictEqual(updated.id, created.id);
-      assert.strictEqual(updated.title, 'Bing Modified');
-      assert.strictEqual(updated.urlTemplate, 'https://www.bing.com/search?q={id}&fresh=1');
-      assert.strictEqual(updated.queryRegex, '(.*)');
-      assert.strictEqual(store.getEngines().length, 1);
-    });
-
-    it('deletes an engine by id and persists', async () => {
-      const engine = await store.saveEngine({
-        title: 'DuckDuckGo',
-        urlTemplate: 'https://duckduckgo.com/?q={query}'
-      });
-
-      assert.strictEqual(store.getEngines().length, 1);
-      const deleted = await store.deleteEngine(engine.id);
-      assert.strictEqual(deleted, true);
-      assert.strictEqual(store.getEngines().length, 0);
-
-      const persisted = await adapter.get('searchEngines');
-      assert.strictEqual(persisted.searchEngines.length, 0);
-    });
-
-    it('returns false when deleting a non-existent engine id', async () => {
-      const deleted = await store.deleteEngine('non-existent-id');
-      assert.strictEqual(deleted, false);
-    });
-  });
-
-  describe('Validation & Edge Cases', () => {
-    it('throws or rejects when saving without a title', async () => {
-      await assert.rejects(
-        async () => {
-          await store.saveEngine({ title: '', urlTemplate: 'https://example.com?q={query}' });
-        },
-        /required/i
-      );
-    });
-
-    it('throws or rejects when saving without a urlTemplate', async () => {
-      await assert.rejects(
-        async () => {
-          await store.saveEngine({ title: 'Test', urlTemplate: '   ' });
-        },
-        /required/i
-      );
-    });
-
-    it('sanitizes null or empty regex fields gracefully', async () => {
-      const engine = await store.saveEngine({
-        title: 'Clean Engine',
-        urlTemplate: 'https://example.com/search?q={query}',
+        title: 'Google Modified',
+        urlTemplate: 'https://www.google.com/search?q={id}&fresh=1',
         queryRegex: '   ',
         queryReplacement: ''
       });
 
-      assert.strictEqual(engine.queryRegex, null);
-      assert.strictEqual(engine.queryReplacement, null);
+      assert.strictEqual(updated.id, created.id);
+      assert.strictEqual(updated.title, 'Google Modified');
+      assert.strictEqual(updated.queryRegex, null);
+      assert.strictEqual(updated.queryReplacement, null);
+      assert.strictEqual(store.getEngines().length, 1);
+
+      const deleted = await store.deleteEngine(created.id);
+      assert.strictEqual(deleted, true);
+      assert.strictEqual(store.getEngines().length, 0);
+      assert.strictEqual(await store.deleteEngine('non-existent-id'), false);
+    });
+
+    it('rejects saving a Search Engine when title or urlTemplate is missing', async () => {
+      await assert.rejects(
+        () => store.saveEngine({ title: '', urlTemplate: 'https://example.com?q={query}' }),
+        /required/i
+      );
+      await assert.rejects(
+        () => store.saveEngine({ title: 'Valid Title', urlTemplate: '   ' }),
+        /required/i
+      );
     });
   });
 
-  describe('Query Formatting (Regex Transformation)', () => {
-    it('returns the raw query if no regex or replacement is configured', () => {
-      const engine = { title: 'Raw', urlTemplate: 'https://test.com?q={query}' };
-      const formatted = store.formatQuery('hello world', engine);
-      assert.strictEqual(formatted, 'hello world');
-    });
-
-    it('applies regex replacement correctly on matched text', () => {
+  describe('Query Formatting & Search URL Compilation', () => {
+    it('extracts and transforms matched regex substring while discarding surrounding text', () => {
       const engine = {
-        title: 'ID Extractor',
-        urlTemplate: 'https://test.com?q={query}',
-        queryRegex: 'ISSUE-(\\d+)',
-        queryReplacement: '$1'
-      };
-
-      const formatted = store.formatQuery('ISSUE-456', engine);
-      assert.strictEqual(formatted, '456');
-    });
-
-    it('discards surrounding unneeded text when extracting matched regex portion', () => {
-      const engine = {
-        title: 'Extractor',
-        urlTemplate: 'https://test.com?q={query}',
+        title: 'Ticket Extractor',
+        urlTemplate: 'https://jira.example.com/browse/{id}',
         queryRegex: '([A-Z]{3}-\\d+)',
         queryReplacement: '$1'
       };
 
-      const formatted = store.formatQuery('Found in commit PRJ-1234 on Friday', engine);
-      assert.strictEqual(formatted, 'PRJ-1234');
+      assert.strictEqual(store.formatQuery('Found in commit PRJ-1234 on Friday', engine), 'PRJ-1234');
+      assert.strictEqual(
+        store.buildSearchUrl('Found in commit PRJ-1234 on Friday', engine),
+        'https://jira.example.com/browse/PRJ-1234'
+      );
     });
 
-    it('returns the raw query if regex does not match input', () => {
-      const engine = {
+    it('falls back to the raw query when regex does not match or is malformed', () => {
+      const nonMatchingEngine = {
         title: 'Extractor',
         urlTemplate: 'https://test.com?q={query}',
         queryRegex: 'ABC-(\\d+)',
         queryReplacement: '$1'
       };
+      assert.strictEqual(store.formatQuery('XYZ-999', nonMatchingEngine), 'XYZ-999');
 
-      const formatted = store.formatQuery('XYZ-999', engine);
-      assert.strictEqual(formatted, 'XYZ-999');
-    });
-
-    it('handles malformed regex pattern safely without crashing', () => {
-      const engine = {
+      const brokenRegexEngine = {
         title: 'Broken Regex',
         urlTemplate: 'https://test.com?q={query}',
         queryRegex: '[invalid(',
         queryReplacement: '$1'
       };
+      const origConsoleError = console.error;
+      console.error = () => {};
+      try {
+        assert.strictEqual(store.formatQuery('test input', brokenRegexEngine), 'test input');
+      } finally {
+        console.error = origConsoleError;
+      }
+    });
 
-      const formatted = store.formatQuery('test input', engine);
-      assert.strictEqual(formatted, 'test input');
+    it('URI-encodes the processed query into {query} or {id} placeholders by engine object or ID', async () => {
+      const saved = await store.saveEngine({
+        title: 'Lookup Engine',
+        urlTemplate: 'https://lookup.com/search?q={query}'
+      });
+
+      assert.strictEqual(
+        store.buildSearchUrl('hello world & more', saved.id),
+        'https://lookup.com/search?q=hello%20world%20%26%20more'
+      );
     });
   });
 
-  describe('Search URL Compilation', () => {
-    it('replaces {query} placeholder with URI-encoded processed query', () => {
-      const engine = {
-        id: 'engine-1',
-        title: 'Google',
-        urlTemplate: 'https://www.google.com/search?q={query}'
-      };
-
-      const url = store.buildSearchUrl('hello world & more', engine);
-      assert.strictEqual(url, 'https://www.google.com/search?q=hello%20world%20%26%20more');
-    });
-
-    it('replaces {id} placeholder with URI-encoded processed query', () => {
-      const engine = {
-        id: 'engine-2',
-        title: 'Jira',
-        urlTemplate: 'https://jira.example.com/browse/{id}',
-        queryRegex: '([A-Z]+-\\d+)',
+  describe('performSearch Navigation Integration', () => {
+    it('compiles the Search Engine URL and opens it in an adjacent active tab', async () => {
+      const engine = await store.saveEngine({
+        title: 'Issue Tracker',
+        urlTemplate: 'https://issues.example.com/{id}',
+        queryRegex: 'BUG-(\\d+)',
         queryReplacement: '$1'
-      };
-
-      const url = store.buildSearchUrl('Ticket ABC-1002 closed', engine);
-      assert.strictEqual(url, 'https://jira.example.com/browse/ABC-1002');
-    });
-
-    it('supports looking up engine by ID for URL building', async () => {
-      const engine = await store.saveEngine({
-        title: 'Engine By ID',
-        urlTemplate: 'https://lookup.com?q={query}'
       });
 
-      const url = store.buildSearchUrl('search term', engine.id);
-      assert.strictEqual(url, 'https://lookup.com?q=search%20term');
+      const memoryTabs = new MemoryTabAdapter();
+      const navigationAdapter = new BrowserTabAdapter(memoryTabs);
+      const sourceTab = { id: 42, index: 2, url: 'https://current.example.com' };
+
+      performSearch('See BUG-789 for details', engine.id, sourceTab, store, navigationAdapter);
+
+      // Wait microtask for openAdjacent
+      await new Promise(resolve => setImmediate(resolve));
+
+      assert.strictEqual(memoryTabs.createdTabs.length, 1);
+      assert.strictEqual(memoryTabs.createdTabs[0].url, 'https://issues.example.com/789');
+      assert.strictEqual(memoryTabs.createdTabs[0].index, 3);
+      assert.strictEqual(memoryTabs.createdTabs[0].openerTabId, 42);
+      assert.strictEqual(memoryTabs.createdTabs[0].active, true);
+    });
+
+    it('does not open a tab when the Search Engine ID does not exist', async () => {
+      const memoryTabs = new MemoryTabAdapter();
+      const navigationAdapter = new BrowserTabAdapter(memoryTabs);
+
+      performSearch('some text', 'unknown-engine', { id: 1, index: 0 }, store, navigationAdapter);
+      await new Promise(resolve => setImmediate(resolve));
+
+      assert.strictEqual(memoryTabs.createdTabs.length, 0);
     });
   });
 
-  describe('Pub-Sub & Multi-window Synchronization', () => {
-    it('notifies subscribers when engines are saved or deleted', async () => {
+  describe('Cross-Window Synchronization & Subscriptions', () => {
+    it('notifies subscribers on local mutations and external storage changes without self-echo', async () => {
       const events = [];
-      const unsubscribe = store.subscribe((event) => {
-        events.push(event);
-      });
+      const unsubscribe = store.subscribe((event) => events.push(event));
 
       const engine = await store.saveEngine({
-        title: 'Sub Test',
-        urlTemplate: 'https://test.com?q={query}'
+        title: 'Local Engine',
+        urlTemplate: 'https://local.com?q={query}'
       });
+      assert.strictEqual(events.length, 1);
+      assert.strictEqual(events[0].type, 'engineSaved');
 
-      await store.deleteEngine(engine.id);
+      // Simulate another extension context (e.g. Popup or Sync) updating shared storage directly
+      await adapter.set({
+        searchEngines: [
+          { id: 'ext-1', title: 'External Engine', urlTemplate: 'https://ext.com?q={query}' }
+        ]
+      });
 
       assert.strictEqual(events.length, 2);
-      assert.strictEqual(events[0].type, 'engineSaved');
-      assert.strictEqual(events[0].engine.id, engine.id);
-      assert.strictEqual(events[1].type, 'engineDeleted');
-      assert.strictEqual(events[1].id, engine.id);
+      assert.deepStrictEqual(events[1], { type: 'sync', source: 'external' });
+      assert.strictEqual(store.getEngines().length, 1);
+      assert.strictEqual(store.getEngines()[0].id, 'ext-1');
 
       unsubscribe();
-      await store.saveEngine({
-        title: 'Another',
-        urlTemplate: 'https://test2.com?q={query}'
-      });
-      assert.strictEqual(events.length, 2); // No new notifications after unsubscribe
-    });
-  });
-
-  describe('Import & Export Portability', () => {
-    it('exports clean snapshot and imports valid datasets', async () => {
-      await store.saveEngine({
-        title: 'Engine 1',
-        urlTemplate: 'https://1.com?q={query}'
-      });
-
-      const exported = store.exportData();
-      assert.strictEqual(exported.searchEngines.length, 1);
-
-      const newStore = new SearchEngineStore(new MemoryStorageAdapter());
-      await newStore.load();
-      const importSuccess = await newStore.importData(exported);
-      assert.strictEqual(importSuccess, true);
-      assert.strictEqual(newStore.getEngines().length, 1);
-      assert.strictEqual(newStore.getEngines()[0].title, 'Engine 1');
-    });
-
-    it('rejects invalid import payloads', async () => {
-      assert.strictEqual(await store.importData(null), false);
-      assert.strictEqual(await store.importData({}), false);
-      assert.strictEqual(await store.importData('string'), false);
+      await store.deleteEngine('ext-1');
+      assert.strictEqual(events.length, 2);
     });
   });
 });

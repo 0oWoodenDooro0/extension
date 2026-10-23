@@ -31,7 +31,7 @@ export async function initializeBackgroundSync(
   await coordinator.init();
 
   // 監聽跨視窗 (Sidebar / Popup) 對本地儲存的異動，僅標記 dirty，不排程倒數同步
-  // 避免平時打字或編輯時觸發多程序快取競爭或刪除剛新增的項目
+  // 避免平時打字或編輯時觸發多程序快取競態或刪除剛新增的項目
   if (storageAdapter && typeof storageAdapter.onChanged === 'function') {
     storageAdapter.onChanged(async (changes) => {
       if (coordinator.isApplyingRemoteSync) return;
@@ -379,9 +379,14 @@ export async function showSaveFeedback(tab, { isExisting = false, title = '' } =
  * 直接保存作用中分頁至 Collection (供快捷鍵或 Context Menu 呼叫)
  * @param {Object|null} tab - 目標分頁物件，為空時自動查詢當前作用中分頁
  * @param {Object} store - CollectionStore 實例
+ * @param {Object} [options] - 額外選項 (如 resolveImage 圖片解析注入)
  * @returns {Promise<Object>}
  */
-export async function saveActiveTabDirectly(tab = null, store = collectionStore) {
+export async function saveActiveTabDirectly(
+  tab = null,
+  store = collectionStore,
+  { resolveImage = getImageForUrl } = {}
+) {
   let targetTab = tab;
   if (!targetTab && typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -399,7 +404,7 @@ export async function saveActiveTabDirectly(tab = null, store = collectionStore)
   const existingItem = store.getItemByUrl(targetTab.url);
   const imageUrl = (existingItem && existingItem.imageUrl)
     ? existingItem.imageUrl
-    : await getImageForUrl(targetTab.url);
+    : await resolveImage(targetTab.url);
 
   const title = (targetTab.title && targetTab.title.trim()) || existingItem?.title || targetTab.url;
 

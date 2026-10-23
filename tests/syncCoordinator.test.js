@@ -1,501 +1,465 @@
-// tests/syncCoordinator.test.js - Unit tests for Google Drive & Sync Coordinator
-import test from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { MemoryGoogleDriveAdapter, DEFAULT_SYNC_FILENAME } from '../sidebar/googleDriveAdapter.js';
-import { SyncCoordinator, mergeUnifiedData, threeWayMergeUnifiedData, SYNC_STATUS } from '../sidebar/syncCoordinator.js';
+import {
+  GoogleDriveAdapter,
+  MemoryGoogleDriveAdapter,
+  DEFAULT_SYNC_FILENAME
+} from '../sidebar/googleDriveAdapter.js';
+import {
+  SyncCoordinator,
+  mergeUnifiedData,
+  threeWayMergeUnifiedData,
+  SYNC_STATUS
+} from '../sidebar/syncCoordinator.js';
 import { CollectionStore, MemoryStorageAdapter as CollectionMemoryAdapter } from '../sidebar/store.js';
 import { SearchEngineStore, MemoryStorageAdapter as SearchMemoryAdapter } from '../searchEngineStore.js';
+import { initializeBackgroundSync } from '../background.js';
 
-test('Google Drive Sync & Coordinator Test Suite', async (t) => {
-  await t.test('mergeUnifiedData - Fallback 2-Way Merging when base is null', () => {
-    const localData = {
-      items: [
-        { id: 'item-1', title: 'Local newer item', url: 'https://a.com', updatedAt: 200 },
-        { id: 'item-2', title: 'Local only item', url: 'https://b.com', updatedAt: 100 }
-      ],
-      tags: ['Tech', 'Dev'],
-      searchEngines: [
-        { id: 'eng-1', title: 'Engine 1', urlTemplate: 'https://eng.com?q={query}', updatedAt: 100 }
-      ]
-    };
+describe('Cloud Synchronization, 3-Way Merge & GoogleDriveAdapter', () => {
+  describe('Unified Backup Merge Algorithms (ADR-0002)', () => {
+    it('falls back to 2-Way Union Merge when Base Snapshot is null, keeping newer edits and unioning all Collection Items, Tags, and Search Engines', () => {
+      const localData = {
+        items: [
+          { id: 'item-1', title: 'Local newer item', url: 'https://a.com', updatedAt: 200 },
+          { id: 'item-2', title: 'Local only item', url: 'https://b.com', updatedAt: 100 }
+        ],
+        tags: ['Tech', 'Dev'],
+        searchEngines: [
+          { id: 'eng-1', title: 'Engine 1', urlTemplate: 'https://eng.com?q={query}', updatedAt: 100 }
+        ]
+      };
 
-    const cloudData = {
-      items: [
-        { id: 'item-1', title: 'Cloud older item', url: 'https://a.com', updatedAt: 150 },
-        { id: 'item-3', title: 'Cloud only item', url: 'https://c.com', updatedAt: 300 }
-      ],
-      tags: ['Tech', 'News'],
-      searchEngines: [
-        { id: 'eng-2', title: 'Engine 2', urlTemplate: 'https://eng2.com?q={query}', updatedAt: 200 }
-      ]
-    };
+      const cloudData = {
+        items: [
+          { id: 'item-1', title: 'Cloud older item', url: 'https://a.com', updatedAt: 150 },
+          { id: 'item-3', title: 'Cloud only item', url: 'https://c.com', updatedAt: 300 }
+        ],
+        tags: ['Tech', 'News'],
+        searchEngines: [
+          { id: 'eng-2', title: 'Engine 2', urlTemplate: 'https://eng2.com?q={query}', updatedAt: 200 }
+        ]
+      };
 
-    const merged = mergeUnifiedData(localData, cloudData);
+      const merged = mergeUnifiedData(localData, cloudData, null);
 
-    // Items
-    assert.equal(merged.items.length, 3);
-    const item1 = merged.items.find(i => i.id === 'item-1');
-    assert.equal(item1.title, 'Local newer item'); // Kept newer local
-    const item3 = merged.items.find(i => i.id === 'item-3');
-    assert.equal(item3.title, 'Cloud only item'); // Preserved cloud item
+      assert.equal(merged.items.length, 3);
+      assert.equal(merged.items.find(i => i.id === 'item-1').title, 'Local newer item');
+      assert.equal(merged.items.find(i => i.id === 'item-3').title, 'Cloud only item');
+      assert.deepEqual(merged.tags.sort(), ['Dev', 'News', 'Tech']);
+      assert.equal(merged.searchEngines.length, 2);
+    });
 
-    // Tags
-    assert.deepEqual(merged.tags.sort(), ['Dev', 'News', 'Tech']);
+    it('propagates local deletions and cloud deletions without resurrecting deleted Collection Items, Tags, or Search Engines when Base Snapshot is present', () => {
+      const baseData = {
+        items: [
+          { id: 'item-keep', title: 'Keep', url: 'https://keep.com', updatedAt: 100 },
+          { id: 'item-del-local', title: 'Deleted Locally', url: 'https://del-local.com', updatedAt: 100 },
+          { id: 'item-del-cloud', title: 'Deleted on Cloud', url: 'https://del-cloud.com', updatedAt: 100 }
+        ],
+        tags: ['KeepTag', 'DelLocalTag', 'DelCloudTag'],
+        searchEngines: [
+          { id: 'eng-keep', title: 'Engine Keep', urlTemplate: 'https://1.com?q={query}', updatedAt: 100 },
+          { id: 'eng-del-local', title: 'Engine Del Local', urlTemplate: 'https://2.com?q={query}', updatedAt: 100 }
+        ]
+      };
 
-    // Search Engines
-    assert.equal(merged.searchEngines.length, 2);
+      const localData = {
+        items: [
+          { id: 'item-keep', title: 'Keep', url: 'https://keep.com', updatedAt: 100 },
+          { id: 'item-del-cloud', title: 'Deleted on Cloud', url: 'https://del-cloud.com', updatedAt: 100 }
+        ],
+        tags: ['KeepTag', 'DelCloudTag'],
+        searchEngines: [
+          { id: 'eng-keep', title: 'Engine Keep', urlTemplate: 'https://1.com?q={query}', updatedAt: 100 }
+        ]
+      };
+
+      const cloudData = {
+        items: [
+          { id: 'item-keep', title: 'Keep', url: 'https://keep.com', updatedAt: 100 },
+          { id: 'item-del-local', title: 'Deleted Locally', url: 'https://del-local.com', updatedAt: 100 }
+        ],
+        tags: ['KeepTag', 'DelLocalTag'],
+        searchEngines: [
+          { id: 'eng-keep', title: 'Engine Keep', urlTemplate: 'https://1.com?q={query}', updatedAt: 100 },
+          { id: 'eng-del-local', title: 'Engine Del Local', urlTemplate: 'https://2.com?q={query}', updatedAt: 100 }
+        ]
+      };
+
+      const merged = mergeUnifiedData(localData, cloudData, baseData);
+
+      assert.deepEqual(merged.items.map(i => i.id), ['item-keep']);
+      assert.deepEqual(merged.tags, ['KeepTag']);
+      assert.deepEqual(merged.searchEngines.map(e => e.id), ['eng-keep']);
+    });
+
+    it('resolves edit-vs-delete conflicts in favor of the edited Collection Item (Edit Beats Deletion)', () => {
+      const baseData = {
+        items: [
+          { id: 'item-1', title: 'Original Item 1', url: 'https://1.com', updatedAt: 100 },
+          { id: 'item-2', title: 'Original Item 2', url: 'https://2.com', updatedAt: 100 }
+        ],
+        tags: ['Tag1'],
+        searchEngines: []
+      };
+
+      // Local deleted item-1 but edited item-2; Cloud edited item-1 but deleted item-2
+      const localData = {
+        items: [{ id: 'item-2', title: 'Local Edited Item 2', url: 'https://2.com', updatedAt: 200 }],
+        tags: ['Tag1'],
+        searchEngines: []
+      };
+      const cloudData = {
+        items: [{ id: 'item-1', title: 'Cloud Edited Item 1', url: 'https://1.com', updatedAt: 200 }],
+        tags: ['Tag1'],
+        searchEngines: []
+      };
+
+      const merged = threeWayMergeUnifiedData(localData, cloudData, baseData);
+
+      assert.equal(merged.items.length, 2);
+      assert.equal(merged.items.find(i => i.id === 'item-1').title, 'Cloud Edited Item 1');
+      assert.equal(merged.items.find(i => i.id === 'item-2').title, 'Local Edited Item 2');
+    });
   });
 
-  await t.test('threeWayMergeUnifiedData - Local deletion propagates and is NOT resurrected', () => {
-    const baseData = {
-      items: [
-        { id: 'item-1', title: 'Item 1', url: 'https://1.com', updatedAt: 100 },
-        { id: 'item-2', title: 'Item 2 to delete', url: 'https://2.com', updatedAt: 100 }
-      ],
-      tags: ['KeepTag', 'DeleteTag'],
-      searchEngines: [
-        { id: 'eng-1', title: 'Engine 1', urlTemplate: 'https://1.com?q={query}', updatedAt: 100 },
-        { id: 'eng-2', title: 'Engine 2 to delete', urlTemplate: 'https://2.com?q={query}', updatedAt: 100 }
-      ]
-    };
+  describe('GoogleDriveAdapter (Real OAuth, 401 Retry & Multipart/PATCH REST Protocol)', () => {
+    it('parses OAuth access_token and expiry from launchWebAuthFlow redirect URL and persists credentials', async () => {
+      const storage = new CollectionMemoryAdapter();
+      const mockIdentity = {
+        getRedirectURL: () => 'https://ext-id.chromiumapp.org/',
+        launchWebAuthFlow: ({ url, interactive }, callback) => {
+          assert.equal(interactive, true);
+          assert.match(url, /client_id=test-client-id/);
+          callback('https://ext-id.chromiumapp.org/#access_token=oauth-tok-999&expires_in=3600');
+        }
+      };
 
-    // Local deleted item-2, DeleteTag, and eng-2
-    const localData = {
-      items: [
-        { id: 'item-1', title: 'Item 1', url: 'https://1.com', updatedAt: 100 }
-      ],
-      tags: ['KeepTag'],
-      searchEngines: [
-        { id: 'eng-1', title: 'Engine 1', urlTemplate: 'https://1.com?q={query}', updatedAt: 100 }
-      ]
-    };
+      const origFetch = global.fetch;
+      global.fetch = async (url) => {
+        if (url.includes('userinfo')) {
+          return { ok: true, status: 200, json: async () => ({ email: 'owner@example.com', id: 'u1' }) };
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      };
 
-    // Cloud still has baseData untouched
-    const cloudData = JSON.parse(JSON.stringify(baseData));
+      try {
+        const adapter = new GoogleDriveAdapter({
+          clientId: 'test-client-id',
+          storage,
+          identity: mockIdentity
+        });
 
-    const merged = mergeUnifiedData(localData, cloudData, baseData);
+        const authRes = await adapter.authorize(true);
+        assert.equal(authRes.token, 'oauth-tok-999');
+        assert.equal(authRes.user.email, 'owner@example.com');
+        assert.equal(await adapter.isAuthenticated(), true);
 
-    // item-2 should be cleanly deleted, NOT resurrected!
-    assert.equal(merged.items.length, 1);
-    assert.equal(merged.items[0].id, 'item-1');
+        const stored = await storage.get(['gdrive_token', 'gdrive_auto_connect', 'gdrive_user']);
+        assert.equal(stored.gdrive_token, 'oauth-tok-999');
+        assert.equal(stored.gdrive_auto_connect, true);
+        assert.equal(stored.gdrive_user.email, 'owner@example.com');
+      } finally {
+        global.fetch = origFetch;
+      }
+    });
 
-    // DeleteTag should be removed
-    assert.deepEqual(merged.tags, ['KeepTag']);
+    it('automatically refreshes token and retries request once when Google Drive API returns 401', async () => {
+      const storage = new CollectionMemoryAdapter();
+      await storage.set({
+        gdrive_client_id: 'client-123',
+        gdrive_token: 'expired-token',
+        gdrive_auto_connect: true
+      });
 
-    // eng-2 should be removed
-    assert.equal(merged.searchEngines.length, 1);
-    assert.equal(merged.searchEngines[0].id, 'eng-1');
+      const mockIdentity = {
+        getRedirectURL: () => 'https://ext-id.chromiumapp.org/',
+        launchWebAuthFlow: ({ interactive }, callback) => {
+          assert.equal(interactive, false, 'Should attempt silent token renewal first');
+          callback('https://ext-id.chromiumapp.org/#access_token=refreshed-token&expires_in=3600');
+        }
+      };
+
+      const authHeadersUsed = [];
+      const origFetch = global.fetch;
+      global.fetch = async (url, options = {}) => {
+        if (url.includes('userinfo')) {
+          return { ok: true, status: 200, json: async () => ({ email: 'user@example.com' }) };
+        }
+        authHeadersUsed.push(options.headers?.Authorization);
+        if (options.headers?.Authorization === 'Bearer expired-token') {
+          return { ok: false, status: 401, text: async () => 'Unauthorized' };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ files: [{ id: 'file-1', name: DEFAULT_SYNC_FILENAME, modifiedTime: '2026-10-23T00:00:00Z' }] })
+        };
+      };
+
+      try {
+        const adapter = new GoogleDriveAdapter({ storage, identity: mockIdentity });
+        const file = await adapter.findFile();
+
+        assert.equal(file.id, 'file-1');
+        assert.deepEqual(authHeadersUsed, ['Bearer expired-token', 'Bearer refreshed-token']);
+      } finally {
+        global.fetch = origFetch;
+      }
+    });
+
+    it('uses POST multipart upload when creating a new cloud file and PATCH media upload when updating an existing file', async () => {
+      const storage = new CollectionMemoryAdapter();
+      await storage.set({
+        gdrive_client_id: 'client-123',
+        gdrive_token: 'valid-token',
+        gdrive_auto_connect: true
+      });
+
+      let existingCloudFile = null;
+      const recordedRequests = [];
+      const origFetch = global.fetch;
+      global.fetch = async (url, options = {}) => {
+        const method = options.method || 'GET';
+        recordedRequests.push({ url, method, headers: options.headers, body: options.body });
+
+        if (method === 'GET' && url.includes('/files?spaces=appDataFolder')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ files: existingCloudFile ? [existingCloudFile] : [] })
+          };
+        }
+        if (method === 'POST' && url.includes('uploadType=multipart')) {
+          existingCloudFile = { id: 'drive-file-100', name: DEFAULT_SYNC_FILENAME, modifiedTime: 't1' };
+          return { ok: true, status: 200, json: async () => existingCloudFile };
+        }
+        if (method === 'PATCH' && url.includes('/files/drive-file-100?uploadType=media')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: 'drive-file-100', name: DEFAULT_SYNC_FILENAME, modifiedTime: 't2' })
+          };
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`);
+      };
+
+      try {
+        const adapter = new GoogleDriveAdapter({ storage });
+
+        // 1st upload: no file on cloud -> POST multipart
+        const createRes = await adapter.uploadJson({ items: [], tags: ['A'], searchEngines: [] });
+        assert.equal(createRes.id, 'drive-file-100');
+        assert.equal(recordedRequests[1].method, 'POST');
+        assert.match(recordedRequests[1].body, /appDataFolder/);
+
+        // 2nd upload: file exists -> PATCH media
+        const updateRes = await adapter.uploadJson({ items: [], tags: ['A', 'B'], searchEngines: [] });
+        assert.equal(updateRes.modifiedTime, 't2');
+        assert.equal(recordedRequests[3].method, 'PATCH');
+      } finally {
+        global.fetch = origFetch;
+      }
+    });
   });
 
-  await t.test('threeWayMergeUnifiedData - Cloud deletion propagates to local', () => {
-    const baseData = {
-      items: [
-        { id: 'item-1', title: 'Item 1', url: 'https://1.com', updatedAt: 100 },
-        { id: 'item-2', title: 'Item 2 deleted on cloud', url: 'https://2.com', updatedAt: 100 }
-      ],
-      tags: ['TagA', 'TagB'],
-      searchEngines: [
-        { id: 'eng-1', title: 'Engine 1', urlTemplate: 'https://1.com?q={query}', updatedAt: 100 }
-      ]
-    };
+  describe('SyncCoordinator Lifecycle & Multi-Device Consistency', () => {
+    it('propagates multi-device deletions cleanly via Base Snapshot without resurrecting deleted items', async () => {
+      const gdrive = new MemoryGoogleDriveAdapter();
+      gdrive.setMockAuth({ token: 'mock-shared' });
 
-    // Local untouched
-    const localData = JSON.parse(JSON.stringify(baseData));
+      // Device A creates 2 items and 2 tags, then performs initial upload
+      const collStoreA = new CollectionStore(new CollectionMemoryAdapter({
+        items: [
+          { id: 'item-A', title: 'Item A', url: 'https://a.com', updatedAt: 100 },
+          { id: 'item-B', title: 'Item B', url: 'https://b.com', updatedAt: 100 }
+        ],
+        tags: ['TagA', 'TagB']
+      }));
+      const seStoreA = new SearchEngineStore(new SearchMemoryAdapter());
+      await collStoreA.load();
+      await seStoreA.load();
 
-    // Cloud has item-2 and TagB deleted
-    const cloudData = {
-      items: [
-        { id: 'item-1', title: 'Item 1', url: 'https://1.com', updatedAt: 100 }
-      ],
-      tags: ['TagA'],
-      searchEngines: [
-        { id: 'eng-1', title: 'Engine 1', urlTemplate: 'https://1.com?q={query}', updatedAt: 100 }
-      ]
-    };
+      const coordA = new SyncCoordinator({ cloudAdapter: gdrive, collectionStore: collStoreA, searchEngineStore: seStoreA });
+      const initialRes = await coordA.sync();
+      assert.equal(initialRes.action, 'uploaded_initial');
 
-    const merged = mergeUnifiedData(localData, cloudData, baseData);
+      // Device B syncs from empty state and receives both items
+      const collStoreB = new CollectionStore(new CollectionMemoryAdapter());
+      const seStoreB = new SearchEngineStore(new SearchMemoryAdapter());
+      await collStoreB.load();
+      await seStoreB.load();
 
-    assert.equal(merged.items.length, 1);
-    assert.equal(merged.items[0].id, 'item-1');
-    assert.deepEqual(merged.tags, ['TagA']);
-  });
+      const coordB = new SyncCoordinator({ cloudAdapter: gdrive, collectionStore: collStoreB, searchEngineStore: seStoreB });
+      await coordB.sync();
+      assert.equal(collStoreB.getItems().length, 2);
 
-  await t.test('threeWayMergeUnifiedData - Edit beats deletion conflict resolution', () => {
-    const baseData = {
-      items: [
-        { id: 'item-1', title: 'Original Item 1', url: 'https://1.com', updatedAt: 100 },
-        { id: 'item-2', title: 'Original Item 2', url: 'https://2.com', updatedAt: 100 }
-      ],
-      tags: ['Tag1'],
-      searchEngines: []
-    };
+      // Device A deletes item-B and TagB and syncs
+      await collStoreA.deleteItem('item-B');
+      await collStoreA.deleteTag('TagB');
+      await coordA.sync();
 
-    // Scenario A: Local deleted item-1, but Cloud edited item-1 to updatedAt 200
-    // Scenario B: Cloud deleted item-2, but Local edited item-2 to updatedAt 200
-    const localData = {
-      items: [
-        { id: 'item-2', title: 'Local Edited Item 2', url: 'https://2.com', updatedAt: 200 }
-      ],
-      tags: ['Tag1'],
-      searchEngines: []
-    };
-
-    const cloudData = {
-      items: [
-        { id: 'item-1', title: 'Cloud Edited Item 1', url: 'https://1.com', updatedAt: 200 }
-      ],
-      tags: ['Tag1'],
-      searchEngines: []
-    };
-
-    const merged = threeWayMergeUnifiedData(localData, cloudData, baseData);
-
-    assert.equal(merged.items.length, 2);
-    const item1 = merged.items.find(i => i.id === 'item-1');
-    const item2 = merged.items.find(i => i.id === 'item-2');
-
-    assert.equal(item1.title, 'Cloud Edited Item 1'); // Cloud edit preserved despite local deletion
-    assert.equal(item2.title, 'Local Edited Item 2'); // Local edit preserved despite cloud deletion
-  });
-
-  await t.test('MemoryGoogleDriveAdapter - upload and download operations', async () => {
-    const gdrive = new MemoryGoogleDriveAdapter();
-    assert.equal(await gdrive.isAuthenticated(), false);
-
-    // Authenticate
-    gdrive.setMockAuth({ token: 'mock-token', email: 'test@gmail.com' });
-    assert.equal(await gdrive.isAuthenticated(), true);
-
-    const userInfo = await gdrive.getUserInfo();
-    assert.equal(userInfo.email, 'test@gmail.com');
-
-    // Initially no file
-    let file = await gdrive.findFile();
-    assert.equal(file, null);
-
-    // Upload
-    const payload = { items: [{ id: '1' }], tags: ['a'], searchEngines: [] };
-    const uploadRes = await gdrive.uploadJson(payload);
-    assert.ok(uploadRes.id);
-
-    // Find file again
-    file = await gdrive.findFile();
-    assert.ok(file);
-    assert.equal(file.name, DEFAULT_SYNC_FILENAME);
-
-    // Download file
-    const downloaded = await gdrive.downloadJson(file.id);
-    assert.deepEqual(downloaded, payload);
-  });
-
-  await t.test('SyncCoordinator - Initial upload when cloud is empty', async () => {
-    const collAdapter = new CollectionMemoryAdapter({
-      items: [{ id: 'item-1', title: 'First Item', url: 'https://test.com', addDate: 100 }],
-      tags: ['Tag1']
-    });
-    const seAdapter = new SearchMemoryAdapter({ searchEngines: [] });
-
-    const collectionStore = new CollectionStore(collAdapter);
-    const searchEngineStore = new SearchEngineStore(seAdapter);
-    await collectionStore.load();
-    await searchEngineStore.load();
-
-    const gdrive = new MemoryGoogleDriveAdapter();
-    gdrive.setMockAuth({ token: 'mock-1', email: 'user@gmail.com' });
-
-    const coordinator = new SyncCoordinator({
-      cloudAdapter: gdrive,
-      collectionStore,
-      searchEngineStore
+      // Device B syncs -> item-B and TagB are deleted on Device B as well
+      await coordB.sync();
+      assert.deepEqual(collStoreB.getItems().map(i => i.id), ['item-A']);
+      assert.deepEqual(collStoreB.getTags(), ['TagA']);
     });
 
-    const res = await coordinator.sync();
-    assert.equal(res.success, true);
-    assert.equal(res.action, 'uploaded_initial');
-    assert.equal(res.stats.itemsCount, 1);
+    it('queues concurrent sync() calls via Single-Flight lock so changes made mid-sync are synced immediately afterward', async () => {
+      const gdrive = new MemoryGoogleDriveAdapter();
+      gdrive.setMockAuth({ token: 'mock-token' });
 
-    // Verify it is on cloud
-    const cloudFile = await gdrive.findFile();
-    assert.ok(cloudFile);
-    const cloudContent = await gdrive.downloadJson(cloudFile.id);
-    assert.equal(cloudContent.items.length, 1);
-    assert.equal(cloudContent.items[0].title, 'First Item');
+      const collStore = new CollectionStore(new CollectionMemoryAdapter({
+        items: [{ id: 'item-1', title: 'First', url: 'https://1.com', updatedAt: 100 }],
+        tags: []
+      }));
+      const seStore = new SearchEngineStore(new SearchMemoryAdapter());
+      await collStore.load();
+      await seStore.load();
 
-    // Verify base is saved
-    assert.ok(coordinator.getBaseData());
-    assert.equal(coordinator.getBaseData().items.length, 1);
-  });
+      const coordinator = new SyncCoordinator({
+        cloudAdapter: gdrive,
+        collectionStore: collStore,
+        searchEngineStore: seStore
+      });
 
-  await t.test('SyncCoordinator - Multi-device sync and deletion propagation', async () => {
-    const gdrive = new MemoryGoogleDriveAdapter();
-    gdrive.setMockAuth({ token: 'mock-shared' });
+      let uploadCalls = 0;
+      const origUpload = gdrive.uploadJson.bind(gdrive);
+      gdrive.uploadJson = async (data, filename) => {
+        uploadCalls++;
+        if (uploadCalls === 1) {
+          // Simulate a user saving a second item while the first upload is in-flight
+          await collStore.saveItem({ id: 'item-2', title: 'Added Mid-Sync', url: 'https://2.com' });
+          // Trigger a second sync while the first is still running
+          coordinator.sync();
+        }
+        return await origUpload(data, filename);
+      };
 
-    // 1. Device A sets up 2 items and a tag, then syncs
-    const collAdapterA = new CollectionMemoryAdapter({
-      items: [
-        { id: 'item-A', title: 'Item A', url: 'https://a.com', updatedAt: 100 },
-        { id: 'item-B', title: 'Item B to be deleted', url: 'https://b.com', updatedAt: 100 }
-      ],
-      tags: ['TagA', 'TagB']
-    });
-    const collStoreA = new CollectionStore(collAdapterA);
-    const seStoreA = new SearchEngineStore(new SearchMemoryAdapter());
-    await collStoreA.load();
-    await seStoreA.load();
+      const finalResult = await coordinator.sync();
+      assert.equal(finalResult.success, true);
+      assert.equal(uploadCalls, 2, 'Second sync should have been queued and executed after the first completed');
 
-    const coordA = new SyncCoordinator({
-      cloudAdapter: gdrive,
-      collectionStore: collStoreA,
-      searchEngineStore: seStoreA
-    });
-    const resA1 = await coordA.sync();
-    assert.equal(resA1.success, true);
-
-    // 2. Device B syncs initially (starts empty)
-    const collAdapterB = new CollectionMemoryAdapter();
-    const collStoreB = new CollectionStore(collAdapterB);
-    const seStoreB = new SearchEngineStore(new SearchMemoryAdapter());
-    await collStoreB.load();
-    await seStoreB.load();
-
-    const coordB = new SyncCoordinator({
-      cloudAdapter: gdrive,
-      collectionStore: collStoreB,
-      searchEngineStore: seStoreB
-    });
-    const resB1 = await coordB.sync();
-    assert.equal(resB1.success, true);
-    assert.equal(collStoreB.getItems().length, 2);
-    assert.deepEqual(collStoreB.getTags().sort(), ['TagA', 'TagB']);
-
-    // 3. User deletes 'Item B' and 'TagB' on Device A
-    await collStoreA.deleteItem('item-B');
-    await collStoreA.deleteTag('TagB');
-    assert.equal(collStoreA.getItems().length, 1);
-
-    // 4. Device A syncs -> Cloud should now have only Item A and TagA
-    const resA2 = await coordA.sync();
-    assert.equal(resA2.success, true);
-
-    const cloudFile = await gdrive.findFile();
-    const cloudData = await gdrive.downloadJson(cloudFile.id);
-    assert.equal(cloudData.items.length, 1);
-    assert.equal(cloudData.items[0].id, 'item-A');
-    assert.deepEqual(cloudData.tags, ['TagA']);
-
-    // 5. Device B syncs -> Device B should delete Item B and TagB (NO RESURRECTION!)
-    const resB2 = await coordB.sync();
-    assert.equal(resB2.success, true);
-    assert.equal(collStoreB.getItems().length, 1);
-    assert.equal(collStoreB.getItems()[0].id, 'item-A');
-    assert.deepEqual(collStoreB.getTags(), ['TagA']);
-
-    // 6. Device A syncs once more -> Still only Item A (Stable state)
-    const resA3 = await coordA.sync();
-    assert.equal(resA3.success, true);
-    assert.equal(collStoreA.getItems().length, 1);
-  });
-
-  await t.test('SyncCoordinator - Handles unauthenticated state cleanly', async () => {
-    const gdrive = new MemoryGoogleDriveAdapter(); // no mock auth
-    const collStore = new CollectionStore(new CollectionMemoryAdapter());
-    const seStore = new SearchEngineStore(new SearchMemoryAdapter());
-
-    const coordinator = new SyncCoordinator({
-      cloudAdapter: gdrive,
-      collectionStore: collStore,
-      searchEngineStore: seStore
+      const cloudFile = await gdrive.findFile();
+      const cloudData = await gdrive.downloadJson(cloudFile.id);
+      assert.equal(cloudData.items.length, 2);
     });
 
-    const res = await coordinator.sync();
-    assert.equal(res.success, false);
-    assert.match(res.error, /not authenticated/i);
-    assert.equal(coordinator.status, SYNC_STATUS.ERROR);
-  });
+    it('updates Base Snapshot on force pushToCloud and force pullFromCloud, and reports ERROR when unauthenticated', async () => {
+      const unauthDrive = new MemoryGoogleDriveAdapter();
+      const unauthCoord = new SyncCoordinator({
+        cloudAdapter: unauthDrive,
+        collectionStore: new CollectionStore(new CollectionMemoryAdapter()),
+        searchEngineStore: new SearchEngineStore(new SearchMemoryAdapter())
+      });
 
-  await t.test('SyncCoordinator - pullFromCloud and pushToCloud update base snapshot', async () => {
-    const gdrive = new MemoryGoogleDriveAdapter();
-    gdrive.setMockAuth({ token: 'mock-token' });
+      const unauthRes = await unauthCoord.sync();
+      assert.equal(unauthRes.success, false);
+      assert.equal(unauthCoord.status, SYNC_STATUS.ERROR);
 
-    const collAdapter = new CollectionMemoryAdapter({
-      items: [{ id: 'item-orig', title: 'Original', url: 'https://orig.com', addDate: 100 }],
-      tags: ['OrigTag']
-    });
-    const collStore = new CollectionStore(collAdapter);
-    const seStore = new SearchEngineStore(new SearchMemoryAdapter());
-    await collStore.load();
-    await seStore.load();
+      // Authenticated push & pull
+      const gdrive = new MemoryGoogleDriveAdapter();
+      gdrive.setMockAuth({ token: 'mock-token' });
 
-    const coordinator = new SyncCoordinator({
-      cloudAdapter: gdrive,
-      collectionStore: collStore,
-      searchEngineStore: seStore
-    });
+      const collStore = new CollectionStore(new CollectionMemoryAdapter({
+        items: [{ id: 'item-orig', title: 'Original', url: 'https://orig.com', addDate: 100 }],
+        tags: ['OrigTag']
+      }));
+      const seStore = new SearchEngineStore(new SearchMemoryAdapter());
+      await collStore.load();
+      await seStore.load();
 
-    // Push
-    const pushRes = await coordinator.pushToCloud();
-    assert.equal(pushRes.success, true);
-    assert.equal(coordinator.getBaseData().items[0].id, 'item-orig');
+      const coordinator = new SyncCoordinator({
+        cloudAdapter: gdrive,
+        collectionStore: collStore,
+        searchEngineStore: seStore
+      });
 
-    // Simulate cloud changing
-    const file = await gdrive.findFile();
-    await gdrive.uploadJson({
-      items: [{ id: 'item-cloud', title: 'From Cloud', url: 'https://cloud.com', addDate: 200 }],
-      tags: ['CloudTag'],
-      searchEngines: []
-    });
+      await coordinator.pushToCloud();
+      assert.equal(coordinator.getBaseData().items[0].id, 'item-orig');
 
-    // Pull
-    const pullRes = await coordinator.pullFromCloud();
-    assert.equal(pullRes.success, true);
-    assert.equal(collStore.getItems()[0].id, 'item-cloud');
-    assert.equal(coordinator.getBaseData().items[0].id, 'item-cloud');
-  });
+      await gdrive.uploadJson({
+        items: [{ id: 'item-cloud', title: 'From Cloud', url: 'https://cloud.com', addDate: 200 }],
+        tags: ['CloudTag'],
+        searchEngines: []
+      });
 
-  await t.test('Auto-Login & Sync on Startup - Silent token renewal and fallback to interactive login', async () => {
-    const gdrive = new MemoryGoogleDriveAdapter();
-    const collStore = new CollectionStore(new CollectionMemoryAdapter());
-    const seStore = new SearchEngineStore(new SearchMemoryAdapter());
-    const storage = new CollectionMemoryAdapter();
-
-    const coordinator = new SyncCoordinator({
-      cloudAdapter: gdrive,
-      collectionStore: collStore,
-      searchEngineStore: seStore,
-      storage
-    });
-    await coordinator.init();
-
-    // When auto-connect is not enabled, autoLoginAndSync should skip cleanly
-    const skipRes = await coordinator.autoLoginAndSync({ allowInteractiveFallback: true });
-    assert.equal(skipRes.skipped, true);
-
-    // Enable auto-connect flag
-    await storage.set({ gdrive_auto_connect: true });
-
-    // Silent auth succeeds
-    gdrive.setMockAuth({ token: 'silent-tok', email: 'silent@test.com' });
-    const autoRes = await coordinator.autoLoginAndSync({ allowInteractiveFallback: false });
-    assert.equal(autoRes.success, true);
-    assert.equal(autoRes.action, 'uploaded_initial');
-  });
-
-  await t.test('Flush Pending Sync on Extension/Browser Close', async () => {
-    const gdrive = new MemoryGoogleDriveAdapter();
-    gdrive.setMockAuth({ token: 'mock-token' });
-
-    const collStore = new CollectionStore(new CollectionMemoryAdapter());
-    const seStore = new SearchEngineStore(new SearchMemoryAdapter());
-    await collStore.load();
-    await seStore.load();
-
-    const coordinator = new SyncCoordinator({
-      cloudAdapter: gdrive,
-      collectionStore: collStore,
-      searchEngineStore: seStore
-    });
-    await coordinator.init();
-
-    // Initial sync
-    await coordinator.sync();
-
-    // User adds a new item locally
-    await collStore.saveItem({
-      title: 'Saved Before Closing Browser',
-      url: 'https://close-test.com',
-      tags: ['AutoSave']
+      await coordinator.pullFromCloud();
+      assert.equal(collStore.getItems()[0].id, 'item-cloud');
+      assert.equal(coordinator.getBaseData().items[0].id, 'item-cloud');
     });
 
-    // Mark dirty (as done when storage changes)
-    await coordinator.markDirty();
-    assert.equal(coordinator.isDirty, true);
+    it('enforces ADR-0001 via initializeBackgroundSync: marks dirty on external storage changes without starting a debounce timer, ignores sync_in_progress, and preserves items added in other contexts on flush', async () => {
+      const gdrive = new MemoryGoogleDriveAdapter();
+      gdrive.setMockAuth({ token: 'mock-token', email: 'user@gmail.com' });
 
-    // User closes the extension/browser -> flushPendingSync executes
-    const flushRes = await coordinator.flushPendingSync();
-    assert.equal(flushRes.success, true);
-    assert.equal(coordinator.isDirty, false);
+      const sharedStorage = new CollectionMemoryAdapter();
+      await sharedStorage.set({ gdrive_auto_connect: true });
 
-    // Verify the item was saved to Google Drive immediately on close
-    const cloudFile = await gdrive.findFile();
-    const cloudData = await gdrive.downloadJson(cloudFile.id);
-    assert.equal(cloudData.items.length, 1);
-    assert.equal(cloudData.items[0].title, 'Saved Before Closing Browser');
+      await gdrive.uploadJson({
+        version: 1,
+        items: [{ id: 'item-cloud-1', title: 'Existing Cloud Item', url: 'https://cloud-1.com', tags: ['work'], updatedAt: 1000 }],
+        tags: ['work'],
+        searchEngines: []
+      });
 
-    // Calling flushPendingSync again when no changes occurred should skip cleanly
-    const secondFlush = await coordinator.flushPendingSync();
-    assert.equal(secondFlush.success, true);
-    assert.equal(secondFlush.skipped, true);
-  });
+      // Context 1: Background Service Worker initialized via initializeBackgroundSync
+      const bgCollStore = new CollectionStore(sharedStorage);
+      const bgSeStore = new SearchEngineStore(new SearchMemoryAdapter());
+      const bgCoordinator = new SyncCoordinator({
+        cloudAdapter: gdrive,
+        collectionStore: bgCollStore,
+        searchEngineStore: bgSeStore,
+        storage: sharedStorage
+      });
+      await initializeBackgroundSync(bgCoordinator, sharedStorage);
 
-  await t.test('Option A: Multi-context safety - newly added items are never dropped by background flush', async () => {
-    const gdrive = new MemoryGoogleDriveAdapter();
-    gdrive.setMockAuth({ token: 'mock-token', email: 'user@gmail.com' });
+      // Initial sync brings cloud item into shared storage and clears dirty flag
+      await bgCoordinator.sync();
+      assert.equal(bgCoordinator.isDirty, false);
 
-    // Shared storage simulating chrome.storage.local
-    const sharedStorage = new CollectionMemoryAdapter();
-    await sharedStorage.set({ gdrive_auto_connect: true });
+      // Verify sync_in_progress changes do NOT mark coordinator dirty
+      await sharedStorage.set({
+        sync_in_progress: true,
+        items: [{ id: 'item-cloud-1', title: 'Existing Cloud Item', url: 'https://cloud-1.com', tags: ['work'], updatedAt: 1000 }]
+      });
+      assert.equal(bgCoordinator.isDirty, false);
+      await sharedStorage.set({ sync_in_progress: false });
 
-    // Initial item in cloud
-    const initialBackup = {
-      version: 1,
-      items: [{ id: 'item-cloud-1', title: 'Existing Cloud Item', url: 'https://cloud-1.com', tags: ['work'], updatedAt: 1000 }],
-      tags: ['work'],
-      searchEngines: []
-    };
-    await gdrive.uploadJson(initialBackup);
+      // Context 2: Sidebar UI Store saves a brand-new Collection Item to sharedStorage
+      const uiCollStore = new CollectionStore(sharedStorage);
+      await uiCollStore.load();
+      await uiCollStore.saveItem({
+        id: 'item-local-new',
+        title: 'Newly Added Local Item',
+        url: 'https://local-new.com',
+        tags: ['personal']
+      });
 
-    // Context 1: Background Service Worker Store & Coordinator
-    const bgCollStore = new CollectionStore(sharedStorage);
-    const bgSeStore = new SearchEngineStore(new SearchMemoryAdapter());
-    const bgCoordinator = new SyncCoordinator({
-      cloudAdapter: gdrive,
-      collectionStore: bgCollStore,
-      searchEngineStore: bgSeStore,
-      storage: sharedStorage
+      // initializeBackgroundSync's onChanged listener automatically marked bgCoordinator dirty WITHOUT starting a timer
+      assert.equal(bgCoordinator.isDirty, true);
+      assert.equal(bgCoordinator._autoSyncTimer, null);
+
+      // Simulate stale in-memory cache in background Service Worker
+      bgCollStore.items = [];
+
+      // Closing Sidebar triggers flushPendingSync -> reloads fresh state from sharedStorage and merges cleanly
+      const flushResult = await bgCoordinator.flushPendingSync();
+      assert.equal(flushResult.success, true);
+      assert.equal(bgCoordinator.isDirty, false);
+
+      const finalCloudFile = await gdrive.findFile();
+      const finalCloudData = await gdrive.downloadJson(finalCloudFile.id);
+      assert.deepEqual(
+        finalCloudData.items.map(i => i.id).sort(),
+        ['item-cloud-1', 'item-local-new']
+      );
+
+      // Subsequent flush when nothing is dirty skips network sync cleanly
+      const secondFlush = await bgCoordinator.flushPendingSync();
+      assert.equal(secondFlush.skipped, true);
+      assert.equal(secondFlush.reason, 'already_in_sync');
     });
-    await bgCoordinator.init();
-
-    // Context 2: Sidebar UI Store
-    const uiCollStore = new CollectionStore(sharedStorage);
-    const uiSeStore = new SearchEngineStore(new SearchMemoryAdapter());
-    await uiCollStore.load();
-
-    // Initial sync brings the cloud item into local storage
-    await bgCoordinator.sync();
-    await uiCollStore.load();
-    assert.equal(uiCollStore.items.length, 1);
-    assert.equal(uiCollStore.items[0].id, 'item-cloud-1');
-
-    // Sidebar UI adds a brand new item (saved directly to shared storage)
-    await uiCollStore.saveItem({
-      id: 'item-local-new',
-      title: 'Newly Added Local Item',
-      url: 'https://local-new.com',
-      tags: ['personal']
-    });
-
-    // Option A: Background marks dirty when storage changes, but does NOT run 3s debounce timer
-    await bgCoordinator.markDirty();
-    assert.equal(bgCoordinator.isDirty, true);
-    assert.equal(bgCoordinator._autoSyncTimer, null); // No debounced timer running
-
-    // Simulate stale in-memory cache in background
-    bgCollStore.items = [];
-    assert.equal(bgCollStore.items.length, 0);
-
-    // User closes the extension -> Background flushPendingSync is called
-    const flushResult = await bgCoordinator.flushPendingSync();
-    assert.equal(flushResult.success, true);
-    assert.equal(bgCoordinator.isDirty, false);
-
-    // Verify: createUnifiedBackup loaded fresh data from storage, so the newly added item was NOT deleted!
-    const finalCloudFile = await gdrive.findFile();
-    const finalCloudData = await gdrive.downloadJson(finalCloudFile.id);
-
-    const titles = finalCloudData.items.map(i => i.title);
-    assert.ok(titles.includes('Existing Cloud Item'), 'Existing cloud item must remain');
-    assert.ok(titles.includes('Newly Added Local Item'), 'Newly added local item must NOT be dropped');
-    assert.equal(finalCloudData.items.length, 2);
   });
 });

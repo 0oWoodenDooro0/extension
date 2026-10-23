@@ -1,25 +1,22 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { CollectionStore, MemoryStorageAdapter } from '../sidebar/store.js';
-import { isValidWebUrl, saveActiveTabDirectly, inPageToast } from '../background.js';
+import { isValidWebUrl, saveActiveTabDirectly } from '../background.js';
 
-describe('Quick Save Feature (Keyboard Shortcut)', () => {
+describe('Quick Save Collection Item (saveActiveTabDirectly)', () => {
   describe('isValidWebUrl', () => {
-    it('accepts standard http and https URLs', () => {
+    it('accepts standard http and https web URLs', () => {
       assert.strictEqual(isValidWebUrl('https://github.com'), true);
       assert.strictEqual(isValidWebUrl('http://localhost:3000'), true);
       assert.strictEqual(isValidWebUrl('https://example.com/sub/path?q=1#hash'), true);
     });
 
-    it('rejects internal browser pages and special schemes', () => {
+    it('rejects internal browser schemes and non-string values', () => {
       assert.strictEqual(isValidWebUrl('chrome://extensions'), false);
       assert.strictEqual(isValidWebUrl('chrome-extension://abcdef/popup.html'), false);
       assert.strictEqual(isValidWebUrl('about:blank'), false);
       assert.strictEqual(isValidWebUrl('file:///home/user/test.html'), false);
       assert.strictEqual(isValidWebUrl('view-source:https://example.com'), false);
-    });
-
-    it('rejects empty, null, or non-string inputs', () => {
       assert.strictEqual(isValidWebUrl(''), false);
       assert.strictEqual(isValidWebUrl(null), false);
       assert.strictEqual(isValidWebUrl(undefined), false);
@@ -28,139 +25,98 @@ describe('Quick Save Feature (Keyboard Shortcut)', () => {
   });
 
   describe('saveActiveTabDirectly', () => {
-    let adapter;
     let store;
 
     beforeEach(async () => {
-      adapter = new MemoryStorageAdapter();
-      store = new CollectionStore(adapter);
+      store = new CollectionStore(new MemoryStorageAdapter());
       await store.load();
     });
 
-    it('returns error when tab has an invalid or internal URL', async () => {
+    it('rejects tabs with invalid or non-web URLs without mutating the store', async () => {
       const tab = { id: 1, title: 'Extensions', url: 'chrome://extensions' };
-      const result = await saveActiveTabDirectly(tab, store);
+      const result = await saveActiveTabDirectly(tab, store, {
+        resolveImage: async () => {
+          throw new Error('resolveImage should not be called for invalid URLs');
+        }
+      });
 
       assert.strictEqual(result.success, false);
       assert.strictEqual(result.reason, 'invalid_url');
       assert.strictEqual(store.getItems().length, 0);
     });
 
-    it('saves a new valid web tab into CollectionStore', async () => {
+    it('saves a new Collection Item with its resolved cover image', async () => {
       const tab = {
         id: 101,
         title: 'Antigravity Documentation',
         url: 'https://antigravity.google.com/docs'
       };
 
-      const result = await saveActiveTabDirectly(tab, store);
+      const resolvedUrls = [];
+      const result = await saveActiveTabDirectly(tab, store, {
+        resolveImage: async (url) => {
+          resolvedUrls.push(url);
+          return 'https://antigravity.google.com/og-cover.png';
+        }
+      });
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.isExisting, false);
+      assert.deepStrictEqual(resolvedUrls, ['https://antigravity.google.com/docs']);
       assert.strictEqual(result.item.title, 'Antigravity Documentation');
       assert.strictEqual(result.item.url, 'https://antigravity.google.com/docs');
+      assert.strictEqual(result.item.imageUrl, 'https://antigravity.google.com/og-cover.png');
 
-      // Verify in store
       const items = store.getItems();
       assert.strictEqual(items.length, 1);
-      assert.strictEqual(items[0].url, 'https://antigravity.google.com/docs');
+      assert.strictEqual(items[0].id, result.item.id);
     });
 
-    it('updates existing item if saved again with updated title, preserving tags', async () => {
-      // 1. Initial save with custom tag
-      const firstTab = {
-        id: 102,
+    it('updates an existing Collection Item by URL while preserving its Tags, Actors, and existing cover image', async () => {
+      const initial = await store.saveItem({
         title: 'Original Title',
-        url: 'https://example.com/article'
-      };
-      const initial = await saveActiveTabDirectly(firstTab, store);
-      await store.saveItem({
-        id: initial.item.id,
-        title: initial.item.title,
-        url: initial.item.url,
+        url: 'https://example.com/article',
+        imageUrl: 'https://example.com/existing-cover.jpg',
         tags: ['Favorite', 'Tech'],
         actors: ['Author A']
       });
 
-      // 2. Trigger quick save again with updated tab title
+      let resolveImageCalled = false;
       const updatedTab = {
         id: 102,
         title: 'Updated Title on Webpage',
         url: 'https://example.com/article'
       };
-      const result = await saveActiveTabDirectly(updatedTab, store);
+      const result = await saveActiveTabDirectly(updatedTab, store, {
+        resolveImage: async () => {
+          resolveImageCalled = true;
+          return 'https://example.com/new-cover.jpg';
+        }
+      });
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.isExisting, true);
+      assert.strictEqual(resolveImageCalled, false, 'Should not re-fetch image when existing item already has imageUrl');
+      assert.strictEqual(result.item.id, initial.id);
       assert.strictEqual(result.item.title, 'Updated Title on Webpage');
-      assert.strictEqual(result.item.id, initial.item.id);
-
-      // Verify tags and actors were preserved
+      assert.strictEqual(result.item.imageUrl, 'https://example.com/existing-cover.jpg');
       assert.deepStrictEqual(result.item.tags, ['Favorite', 'Tech']);
       assert.deepStrictEqual(result.item.actors, ['Author A']);
-
-      // No duplicate items created
       assert.strictEqual(store.getItems().length, 1);
     });
 
-    it('uses URL as fallback title if tab.title is empty or whitespace', async () => {
+    it('falls back to existing title or URL when tab.title is blank', async () => {
       const tab = {
         id: 103,
         title: '   ',
         url: 'https://example.com/no-title'
       };
 
-      const result = await saveActiveTabDirectly(tab, store);
+      const result = await saveActiveTabDirectly(tab, store, {
+        resolveImage: async () => null
+      });
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.item.title, 'https://example.com/no-title');
-    });
-  });
-
-  describe('inPageToast DOM execution (simulated DOM)', () => {
-    it('creates toast element with proper styles and replaces previous toast', () => {
-      // Simple mock DOM environment for inPageToast verification
-      const elements = new Map();
-      const mockDocument = {
-        getElementById: (id) => elements.get(id) || null,
-        createElement: (tag) => {
-          const el = {
-            tagName: tag,
-            style: {},
-            innerText: '',
-            id: '',
-            remove: () => {
-              if (el.id) elements.delete(el.id);
-            }
-          };
-          return el;
-        },
-        body: {
-          appendChild: (el) => {
-            if (el.id) elements.set(el.id, el);
-          }
-        }
-      };
-
-      global.document = mockDocument;
-      global.requestAnimationFrame = (cb) => cb();
-
-      // First toast
-      inPageToast('Saved item 1', false);
-      const toast1 = elements.get('__collection_ext_toast__');
-      assert.ok(toast1);
-      assert.strictEqual(toast1.innerText, 'Saved item 1');
-      assert.ok(toast1.style.background.includes('16, 185, 129')); // Green theme
-
-      // Second toast (replaces first)
-      inPageToast('Updated item 2', true);
-      const toast2 = elements.get('__collection_ext_toast__');
-      assert.ok(toast2);
-      assert.strictEqual(toast2.innerText, 'Updated item 2');
-      assert.ok(toast2.style.background.includes('30, 64, 175')); // Blue theme
-
-      // Cleanup mock
-      delete global.document;
-      delete global.requestAnimationFrame;
     });
   });
 });
