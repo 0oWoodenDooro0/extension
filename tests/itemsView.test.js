@@ -13,6 +13,7 @@ import { tabAdapter } from '../tabAdapter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const sidebarHtml = fs.readFileSync(path.resolve(__dirname, '../sidebar/sidebar.html'), 'utf8');
 
 function createMockDocument() {
   const elementRegistry = new Map();
@@ -268,8 +269,8 @@ describe('Collection Item Card Tag Rendering (Ticket #14)', () => {
     it('renders up to the first 3 assigned tags with # prefix', () => {
       const item = {
         id: 'item-1',
-        title: 'Multi Tag Article',
-        url: 'https://example.com/article',
+        title: 'Multi Tag Item',
+        url: 'https://example.com/item',
         tags: ['Frontend', 'JavaScript', 'CSS', 'Design', 'Web']
       };
 
@@ -291,8 +292,8 @@ describe('Collection Item Card Tag Rendering (Ticket #14)', () => {
     it('renders single tag with # prefix when item has only 1 tag', () => {
       const item = {
         id: 'item-2',
-        title: 'Single Tag Article',
-        url: 'https://example.com/article-2',
+        title: 'Single Tag Item',
+        url: 'https://example.com/item-2',
         tags: ['SoloTag']
       };
 
@@ -394,11 +395,7 @@ describe('Collection Item Card Tag Rendering (Ticket #14)', () => {
 
   describe('Single-Line Ellipsis CSS Styles (sidebar/sidebar.html)', () => {
     it('defines .item-tags styles with single-line ellipsis, small font size, and muted color in sidebar.html', () => {
-      const htmlPath = path.resolve(__dirname, '../sidebar/sidebar.html');
-      const htmlContent = fs.readFileSync(htmlPath, 'utf8');
-
-      // Check for .item-tags rule in sidebar.html
-      const ruleMatch = htmlContent.match(/(?:^|[,\s}])([^{}]*\.item-tags[^{]*)\{([^}]+)\}/);
+      const ruleMatch = sidebarHtml.match(/(?:^|[,\s}])([^{}]*\.item-tags[^{]*)\{([^}]+)\}/);
       assert.ok(ruleMatch, 'CSS rule for .item-tags should exist in sidebar.html');
 
       const ruleBody = ruleMatch[2];
@@ -447,24 +444,6 @@ describe('Collection Item Card Tag Click-to-Filter & Event Isolation (Ticket #15
       assert.strictEqual(calls.length, 1, 'onTagClick should be called once');
       assert.strictEqual(calls[0].tag, 'Frontend');
       assert.strictEqual(calls[0].event, clickEvent);
-    });
-
-    it('supports onTagClick passed directly as a function', () => {
-      const item = {
-        id: 'item-click-fn',
-        title: 'Direct Callback Item',
-        url: 'https://example.com/click-fn',
-        tags: ['Design']
-      };
-
-      let clickedTag = null;
-      const card = renderItemElement(item, globalThis.document, (tag) => {
-        clickedTag = tag;
-      });
-
-      const tagSpan = card.querySelector('.item-tag');
-      tagSpan.click();
-      assert.strictEqual(clickedTag, 'Design');
     });
 
     it('invokes onTagClick for each specific tag among multiple rendered tags', () => {
@@ -550,7 +529,7 @@ describe('Collection Item Card Tag Click-to-Filter & Event Isolation (Ticket #15
       assert.strictEqual(clickEvent.propagationStopped, true, 'propagationStopped must be true');
     });
 
-    it('does NOT invoke the card click handler when clicking an .item-tag', () => {
+    it('does NOT trigger parent card click listener when clicking an .item-tag', () => {
       const item = {
         id: 'item-card-isolation',
         title: 'Card Isolation Test',
@@ -558,33 +537,27 @@ describe('Collection Item Card Tag Click-to-Filter & Event Isolation (Ticket #15
         tags: ['IsolatedTag']
       };
 
-      let cardClickInvoked = false;
+      let cardListenerInvoked = false;
       let tagClickInvoked = false;
 
       const card = renderItemElement(item, globalThis.document, {
         onTagClick: () => {
           tagClickInvoked = true;
-        },
-        onCardClick: () => {
-          cardClickInvoked = true;
         }
       });
 
-      // Also listen on card element directly
-      let directCardListenerInvoked = false;
       card.addEventListener('click', () => {
-        directCardListenerInvoked = true;
+        cardListenerInvoked = true;
       });
 
       const tagSpan = card.querySelector('.item-tag');
       tagSpan.click();
 
       assert.strictEqual(tagClickInvoked, true, 'Tag click callback should be invoked');
-      assert.strictEqual(cardClickInvoked, false, 'Card onCardClick callback MUST NOT be invoked');
-      assert.strictEqual(directCardListenerInvoked, false, 'Card direct click listener MUST NOT be invoked');
+      assert.strictEqual(cardListenerInvoked, false, 'Card direct click listener MUST NOT be invoked');
     });
 
-    it('invokes card click handler when clicking non-tag elements (title, actor, image, card root)', () => {
+    it('allows click event to bubble to card when clicking non-tag elements (title, actor, image, card root)', () => {
       const item = {
         id: 'item-non-tag',
         title: 'Non Tag Elements Test',
@@ -594,10 +567,12 @@ describe('Collection Item Card Tag Click-to-Filter & Event Isolation (Ticket #15
         tags: ['SampleTag']
       };
 
-      const openedUrls = [];
-      const card = renderItemElement(item, globalThis.document, {
-        onCardClick: (url) => {
-          openedUrls.push(url);
+      const clickedUrls = [];
+      const card = renderItemElement(item, globalThis.document);
+      card.addEventListener('click', (e) => {
+        const li = e.target.closest('.listItem');
+        if (li && li.dataset.url) {
+          clickedUrls.push(li.dataset.url);
         }
       });
 
@@ -608,28 +583,28 @@ describe('Collection Item Card Tag Click-to-Filter & Event Isolation (Ticket #15
 
       // 1. Click title
       titleSpan.click();
-      assert.strictEqual(openedUrls.length, 1);
-      assert.strictEqual(openedUrls[0], item.url);
+      assert.strictEqual(clickedUrls.length, 1);
+      assert.strictEqual(clickedUrls[0], item.url);
 
       // 2. Click actor
       actorSpan.click();
-      assert.strictEqual(openedUrls.length, 2);
-      assert.strictEqual(openedUrls[1], item.url);
+      assert.strictEqual(clickedUrls.length, 2);
+      assert.strictEqual(clickedUrls[1], item.url);
 
       // 3. Click image
       imageEl.click();
-      assert.strictEqual(openedUrls.length, 3);
-      assert.strictEqual(openedUrls[2], item.url);
+      assert.strictEqual(clickedUrls.length, 3);
+      assert.strictEqual(clickedUrls[2], item.url);
 
       // 4. Click tags container outside tag span (whitespace)
       tagsContainer.click();
-      assert.strictEqual(openedUrls.length, 4);
-      assert.strictEqual(openedUrls[3], item.url);
+      assert.strictEqual(clickedUrls.length, 4);
+      assert.strictEqual(clickedUrls[3], item.url);
 
       // 5. Click card root directly
       card.click();
-      assert.strictEqual(openedUrls.length, 5);
-      assert.strictEqual(openedUrls[4], item.url);
+      assert.strictEqual(clickedUrls.length, 5);
+      assert.strictEqual(clickedUrls[4], item.url);
     });
 
     it('prevents tabAdapter.openAdjacent in list container delegation when clicking .item-tag', async () => {
@@ -684,19 +659,13 @@ describe('Collection Item Card Tag Click-to-Filter & Event Isolation (Ticket #15
 
   describe('Interactive Tag CSS Styles (sidebar/sidebar.html)', () => {
     it('defines cursor: pointer for .item-tag in sidebar.html', () => {
-      const htmlPath = path.resolve(__dirname, '../sidebar/sidebar.html');
-      const htmlContent = fs.readFileSync(htmlPath, 'utf8');
-
-      const tagRuleMatch = htmlContent.match(/(?:^|[,\s}])([^{}]*\.item-tag\b[^{]*)\{([^}]+)\}/);
+      const tagRuleMatch = sidebarHtml.match(/(?:^|[,\s}])([^{}]*\.item-tag\b[^{]*)\{([^}]+)\}/);
       assert.ok(tagRuleMatch, 'CSS rule for .item-tag should exist in sidebar.html');
       assert.match(tagRuleMatch[2], /cursor\s*:\s*pointer/i, 'Must have cursor: pointer');
     });
 
     it('defines hover styling for .item-tag:hover in sidebar.html', () => {
-      const htmlPath = path.resolve(__dirname, '../sidebar/sidebar.html');
-      const htmlContent = fs.readFileSync(htmlPath, 'utf8');
-
-      const hoverRuleMatch = htmlContent.match(/(?:^|[,\s}])([^{}]*\.item-tag:hover[^{]*)\{([^}]+)\}/);
+      const hoverRuleMatch = sidebarHtml.match(/(?:^|[,\s}])([^{}]*\.item-tag:hover[^{]*)\{([^}]+)\}/);
       assert.ok(hoverRuleMatch, 'CSS rule for .item-tag:hover should exist in sidebar.html');
       assert.match(hoverRuleMatch[2], /text-decoration\s*:\s*underline/i, 'Must have text-decoration: underline');
     });

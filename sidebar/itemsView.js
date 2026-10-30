@@ -280,44 +280,29 @@ function getFilteredItems() {
  * 渲染單個項目卡片元素
  * @param {Object} item 項目資料物件
  * @param {Document} [doc] DOM Document 物件（預設為全域 document）
+ * @param {Object} [options] 選項物件
+ * @param {Function} [options.onTagClick] 點擊標籤時的回呼函數（預設為 toggleFilter）
  * @returns {HTMLElement} 項目卡片 DOM 節點
  */
 export function renderItemElement(item, doc = globalThis.document, options = {}) {
-  let actualDoc = doc;
-  let actualOptions = options;
+  const onTagClick = options?.onTagClick;
 
-  if (typeof doc === 'function' || (doc && typeof doc.createElement !== 'function')) {
-    actualOptions = doc;
-    actualDoc = globalThis.document;
-  }
-
-  const onTagClick = typeof actualOptions === 'function'
-    ? actualOptions
-    : actualOptions?.onTagClick;
-  const onCardClick = actualOptions?.onCardClick;
-
-  const listItem = actualDoc.createElement('li');
-  listItem.className = "listItem";
+  const listItem = doc.createElement('li');
+  listItem.className = 'listItem';
   listItem.id = `item-${item.id}`;
 
   listItem.dataset.id = item.id;
   listItem.dataset.url = item.url;
 
-  if (typeof onCardClick === 'function' && typeof listItem.addEventListener === 'function') {
-    listItem.addEventListener('click', (e) => {
-      onCardClick(item.url, e);
-    });
-  }
-
-  const textContainer = actualDoc.createElement('div');
-  const itemTitleSpan = actualDoc.createElement('span');
+  const textContainer = doc.createElement('div');
+  const itemTitleSpan = doc.createElement('span');
   itemTitleSpan.className = 'item-title';
   itemTitleSpan.innerText = item.title;
   textContainer.appendChild(itemTitleSpan);
 
   const actors = item.actors || [];
   if (actors.length > 0) {
-    const itemActorSpan = actualDoc.createElement('span');
+    const itemActorSpan = doc.createElement('span');
     itemActorSpan.className = 'item-actor';
     itemActorSpan.innerText = `${actors.join(', ')}`;
     textContainer.appendChild(itemActorSpan);
@@ -327,14 +312,14 @@ export function renderItemElement(item, doc = globalThis.document, options = {})
     ? item.tags.filter(t => typeof t === 'string' && t.trim().length > 0)
     : [];
   if (rawTags.length > 0) {
-    const itemTagsContainer = actualDoc.createElement('div');
+    const itemTagsContainer = doc.createElement('div');
     itemTagsContainer.className = 'item-tags';
     const displayTags = rawTags.slice(0, 3);
     displayTags.forEach((tag, idx) => {
       if (idx > 0) {
-        itemTagsContainer.appendChild(actualDoc.createTextNode(' '));
+        itemTagsContainer.appendChild(doc.createTextNode(' '));
       }
-      const tagSpan = actualDoc.createElement('span');
+      const tagSpan = doc.createElement('span');
       tagSpan.className = 'item-tag';
       const cleanTag = tag.trim();
       tagSpan.dataset.tag = cleanTag;
@@ -342,16 +327,15 @@ export function renderItemElement(item, doc = globalThis.document, options = {})
 
       if (typeof tagSpan.addEventListener === 'function') {
         tagSpan.addEventListener('click', (e) => {
-        if (e && typeof e.stopPropagation === 'function') {
-          e.stopPropagation();
-        }
-        if (typeof onTagClick === 'function') {
-          onTagClick(cleanTag, e);
-        } else {
-          toggleFilter(cleanTag);
-        }
-      });
-
+          if (e && typeof e.stopPropagation === 'function') {
+            e.stopPropagation();
+          }
+          if (typeof onTagClick === 'function') {
+            onTagClick(cleanTag, e);
+          } else {
+            toggleFilter(cleanTag);
+          }
+        });
       }
       itemTagsContainer.appendChild(tagSpan);
     });
@@ -361,10 +345,10 @@ export function renderItemElement(item, doc = globalThis.document, options = {})
   listItem.appendChild(textContainer);
 
   if (item.imageUrl) {
-    const itemImage = actualDoc.createElement('img');
+    const itemImage = doc.createElement('img');
     itemImage.className = 'item-image';
     itemImage.src = item.imageUrl;
-    itemImage.loading = "lazy";
+    itemImage.loading = 'lazy';
     itemImage.onerror = (e) => { e.target.style.display = 'none'; };
     listItem.appendChild(itemImage);
   }
