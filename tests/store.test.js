@@ -94,6 +94,76 @@ describe('CollectionStore (Collection Items, Tags & Actors)', () => {
 
       assert.deepStrictEqual(store.getAllActors(), ['Alice', 'Bob', 'Charlie']);
     });
+
+    it('supports optional identifier across saveItem, updates, and persistence reload', async () => {
+      const item = await store.saveItem({
+        title: 'Identifier Test',
+        url: 'https://example.com/ident',
+        identifier: '  RFC-1234  '
+      });
+
+      assert.strictEqual(item.identifier, 'RFC-1234');
+      assert.strictEqual(store.getItemById(item.id)?.identifier, 'RFC-1234');
+
+      // Check persistence
+      const persisted = await adapter.get(['items']);
+      assert.strictEqual(persisted.items[0].identifier, 'RFC-1234');
+
+      // Reload store from adapter
+      const newStore = new CollectionStore(adapter);
+      await newStore.load();
+      assert.strictEqual(newStore.getItemById(item.id)?.identifier, 'RFC-1234');
+
+      // Update identifier
+      const updated = await store.saveItem({
+        id: item.id,
+        title: 'Identifier Test Updated',
+        url: 'https://example.com/ident',
+        identifier: 'RFC-5678'
+      });
+      assert.strictEqual(updated.identifier, 'RFC-5678');
+      assert.strictEqual(store.getItemById(item.id)?.identifier, 'RFC-5678');
+
+      // Clearing identifier with empty string or null sets it to null
+      const cleared = await store.saveItem({
+        id: item.id,
+        title: 'Identifier Test Cleared',
+        url: 'https://example.com/ident',
+        identifier: '   '
+      });
+      assert.strictEqual(cleared.identifier, null);
+    });
+
+    it('provides case-insensitive duplicate identifier lookup excluding specified itemId', async () => {
+      const item1 = await store.saveItem({
+        title: 'Original RFC',
+        url: 'https://example.com/rfc1',
+        identifier: 'RFC-999'
+      });
+      const item2 = await store.saveItem({
+        title: 'Second Spec',
+        url: 'https://example.com/rfc2',
+        identifier: 'SPEC-100'
+      });
+
+      // Exact and case-insensitive match
+      assert.strictEqual(store.hasDuplicateIdentifier('RFC-999'), true);
+      assert.strictEqual(store.hasDuplicateIdentifier('  rfc-999  '), true);
+      assert.strictEqual(store.findItemByIdentifier('rfc-999')?.id, item1.id);
+      assert.strictEqual(store.findItemByIdentifier('spec-100')?.title, 'Second Spec');
+
+      // Exclude specified itemId (e.g. during item edit)
+      assert.strictEqual(store.hasDuplicateIdentifier('RFC-999', item1.id), false);
+      assert.strictEqual(store.findItemByIdentifier('RFC-999', item1.id), null);
+      assert.strictEqual(store.hasDuplicateIdentifier('RFC-999', item2.id), true);
+
+      // Non-existent or empty/whitespace identifiers
+      assert.strictEqual(store.hasDuplicateIdentifier('NONEXISTENT'), false);
+      assert.strictEqual(store.findItemByIdentifier('NONEXISTENT'), null);
+      assert.strictEqual(store.hasDuplicateIdentifier(''), false);
+      assert.strictEqual(store.hasDuplicateIdentifier('   '), false);
+      assert.strictEqual(store.findItemByIdentifier(null), null);
+    });
   });
 
   describe('Tag Management & Cascade Updates', () => {
@@ -166,6 +236,7 @@ describe('CollectionStore (Collection Items, Tags & Actors)', () => {
             url: 'https://nodejs.org/guide',
             tags: ['Backend', 'JavaScript'],
             actors: ['Ryan Dahl', 'Dan Abramov'],
+            identifier: 'NODE-GUIDE-01',
             addDate: 2000
           },
           {
@@ -224,7 +295,12 @@ describe('CollectionStore (Collection Items, Tags & Actors)', () => {
     it('combines Tag intersection, Actor intersection, and full-text search across title, URL, and Actors', () => {
       assert.deepStrictEqual(store.queryItems({ search: 'machine' }).map(i => i.id), ['item-3']);
       assert.deepStrictEqual(store.queryItems({ search: 'nodejs.org' }).map(i => i.id), ['item-2']);
+      assert.deepStrictEqual(store.queryItems({ search: 'node-guide' }).map(i => i.id), ['item-2']);
       assert.deepStrictEqual(store.queryItems({ search: 'guido' }).map(i => i.id), ['item-3']);
+
+      assert.deepStrictEqual(store.queryItems({ identifier: 'NODE-GUIDE-01' }).map(i => i.id), ['item-2']);
+      assert.deepStrictEqual(store.queryItems({ identifier: '  node-guide-01  ' }).map(i => i.id), ['item-2']);
+      assert.deepStrictEqual(store.queryItems({ identifier: 'nonexistent' }), []);
 
       const combined = store.queryItems({
         tags: ['JavaScript'],

@@ -65,7 +65,8 @@ describe('Unified Backup Coordinator', () => {
         title: 'Antigravity Doc',
         url: 'https://example.com/doc',
         tags: ['Tech'],
-        actors: ['Vincent']
+        actors: ['Vincent'],
+        identifier: 'AG-DOC-01'
       });
       await searchEngineStore.saveEngine({
         title: 'GitHub Search',
@@ -79,6 +80,7 @@ describe('Unified Backup Coordinator', () => {
       assert.strictEqual(backup.version, 1);
       assert.strictEqual(backup.items.length, 1);
       assert.strictEqual(backup.items[0].title, 'Antigravity Doc');
+      assert.strictEqual(backup.items[0].identifier, 'AG-DOC-01');
       assert.deepStrictEqual(backup.tags, ['Tech']);
       assert.strictEqual(backup.searchEngines.length, 1);
       assert.strictEqual(backup.searchEngines[0].title, 'GitHub Search');
@@ -102,7 +104,8 @@ describe('Unified Backup Coordinator', () => {
             url: 'https://restored.com',
             tags: ['RestoredTag'],
             addDate: 1700000000000,
-            actors: ['Hero']
+            actors: ['Hero'],
+            identifier: 'REST-001'
           }
         ],
         tags: ['RestoredTag'],
@@ -131,6 +134,7 @@ describe('Unified Backup Coordinator', () => {
         searchEnginesCount: 1
       });
       assert.strictEqual(collectionStore.getItemById('item-101')?.title, 'Restored Item');
+      assert.strictEqual(collectionStore.getItemById('item-101')?.identifier, 'REST-001');
       assert.strictEqual(searchEngineStore.getEngineById('engine-101')?.title, 'Restored Engine');
       assert.strictEqual(collectionNotified, true);
       assert.strictEqual(searchEngineNotified, true);

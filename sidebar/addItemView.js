@@ -3,7 +3,7 @@ import { collectionStore } from './store.js';
 import { tabAdapter } from '../tabAdapter.js';
 
 // --- DOM Elements ---
-let itemTitleInput, itemUrlInput, itemImageUrlInput;
+let itemTitleInput, itemUrlInput, itemIdentifierInput, identifierWarning, itemImageUrlInput;
 let fetchImageButton, imagePreviewContainer, imagePreview, imagePreviewStatus;
 let itemActorInput, addActorButton, selectedActorsContainer, actorSuggestions;
 let existingTagsContainer, saveItemButton, cancelButton, deleteItemButton;
@@ -24,6 +24,8 @@ export function initAddItemView(injectedCallbacks) {
   // 獲取 DOM 元素
   itemTitleInput = document.getElementById('itemTitleInput');
   itemUrlInput = document.getElementById('itemUrlInput');
+  itemIdentifierInput = document.getElementById('itemIdentifierInput');
+  identifierWarning = document.getElementById('identifierWarning');
   itemImageUrlInput = document.getElementById('itemImageUrlInput');
   fetchImageButton = document.getElementById('fetchImageButton');
   imagePreviewContainer = document.getElementById('imagePreviewContainer');
@@ -40,6 +42,10 @@ export function initAddItemView(injectedCallbacks) {
   deleteItemButton = document.getElementById('deleteItemButton');
 
   // 綁定事件
+  if (itemIdentifierInput) {
+    itemIdentifierInput.addEventListener('input', checkDuplicateIdentifier);
+  }
+
   if (fetchImageButton) {
     fetchImageButton.addEventListener('click', () => {
       const url = itemUrlInput ? itemUrlInput.value.trim() : '';
@@ -99,6 +105,11 @@ export function showAddItemView(itemId = null) {
   // 重置表單
   if (itemTitleInput) itemTitleInput.value = '';
   if (itemUrlInput) itemUrlInput.value = '';
+  if (itemIdentifierInput) itemIdentifierInput.value = '';
+  if (identifierWarning) {
+    identifierWarning.style.display = 'none';
+    identifierWarning.textContent = '';
+  }
   if (itemImageUrlInput) itemImageUrlInput.value = '';
   if (itemActorInput) itemActorInput.value = '';
   currentEditingActors = [];
@@ -114,11 +125,13 @@ export function showAddItemView(itemId = null) {
     editingItemId = itemId;
     if (itemTitleInput) itemTitleInput.value = itemToEdit.title;
     if (itemUrlInput) itemUrlInput.value = itemToEdit.url;
+    if (itemIdentifierInput) itemIdentifierInput.value = itemToEdit.identifier || '';
     if (itemImageUrlInput) itemImageUrlInput.value = itemToEdit.imageUrl || '';
     currentEditingActors = itemToEdit.actors ? [...itemToEdit.actors] : [];
 
     if (deleteItemButton) deleteItemButton.style.display = 'block';
     populateTagSelector(itemToEdit.tags || []);
+    checkDuplicateIdentifier();
 
     if (itemToEdit.imageUrl) {
       updateImagePreview(itemToEdit.imageUrl);
@@ -149,6 +162,7 @@ export function showAddItemView(itemId = null) {
       if (existingItem) {
         populateTagSelector(existingItem.tags || []);
         if (itemImageUrlInput) itemImageUrlInput.value = existingItem.imageUrl || '';
+        if (itemIdentifierInput) itemIdentifierInput.value = existingItem.identifier || '';
         currentEditingActors = existingItem.actors ? [...existingItem.actors] : [];
         if (existingItem.imageUrl) {
           updateImagePreview(existingItem.imageUrl);
@@ -159,6 +173,7 @@ export function showAddItemView(itemId = null) {
       }
 
       renderActorChips();
+      checkDuplicateIdentifier();
 
       if (currentTab.url && (!existingItem || !existingItem.imageUrl)) {
         tryFetchImage(currentTab.url, false);
@@ -254,9 +269,29 @@ function tryFetchImage(url, forceUpdate = false) {
   }
 }
 
+function checkDuplicateIdentifier() {
+  if (!itemIdentifierInput || !identifierWarning) return;
+  const val = itemIdentifierInput.value.trim();
+  if (!val) {
+    identifierWarning.style.display = 'none';
+    identifierWarning.textContent = '';
+    return;
+  }
+
+  const duplicate = collectionStore.findItemByIdentifier(val, editingItemId);
+  if (duplicate) {
+    identifierWarning.style.display = 'block';
+    identifierWarning.textContent = `⚠️ Identifier already assigned to "${duplicate.title}"`;
+  } else {
+    identifierWarning.style.display = 'none';
+    identifierWarning.textContent = '';
+  }
+}
+
 async function handleSave() {
   const title = itemTitleInput ? itemTitleInput.value.trim() : '';
   const url = itemUrlInput ? itemUrlInput.value.trim() : '';
+  const identifier = itemIdentifierInput ? itemIdentifierInput.value.trim() : '';
   const imageUrl = itemImageUrlInput ? itemImageUrlInput.value.trim() : '';
   const actors = currentEditingActors;
 
@@ -270,6 +305,7 @@ async function handleSave() {
       id: editingItemId,
       title,
       url,
+      identifier: identifier || null,
       tags: selectedTags,
       imageUrl: imageUrl || null,
       actors: actors

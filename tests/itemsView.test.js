@@ -8,6 +8,8 @@ import {
   getActiveFilters,
   resetFilters
 } from '../sidebar/itemsView.js';
+import { initAddItemView, showAddItemView } from '../sidebar/addItemView.js';
+import { collectionStore, MemoryStorageAdapter } from '../sidebar/store.js';
 import { tabAdapter } from '../tabAdapter.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -667,6 +669,152 @@ describe('Collection Item Card Tag Click-to-Filter & Event Isolation (Ticket #15
       const hoverRuleMatch = sidebarHtml.match(/(?:^|[,\s}])([^{}]*\.item-tag:hover[^{]*)\{([^}]+)\}/);
       assert.ok(hoverRuleMatch, 'CSS rule for .item-tag:hover should exist in sidebar.html');
       assert.match(hoverRuleMatch[2], /text-decoration\s*:\s*underline/i, 'Must have text-decoration: underline');
+    });
+  });
+
+  describe('Add/Edit Item View Identifier & Duplicate Warning (Ticket #19)', () => {
+    let mockDoc;
+    let originalDoc;
+    let formElements;
+    let adapter;
+
+    function setupForm(doc) {
+      const ids = [
+        'itemTitleInput', 'itemUrlInput', 'itemIdentifierInput', 'identifierWarning',
+        'itemImageUrlInput', 'fetchImageButton', 'imagePreviewContainer', 'imagePreview',
+        'imagePreviewStatus', 'itemActorInput', 'addActorButton', 'selectedActorsContainer',
+        'actorSuggestions', 'existingTagsContainer', 'saveItemButton', 'cancelButton',
+        'deleteItemButton'
+      ];
+      const elements = {};
+      for (const id of ids) {
+        const tag = id.includes('Button') ? 'button' : id.includes('Input') ? 'input' : 'div';
+        const el = doc.createElement(tag);
+        el.id = id;
+        el.value = '';
+        elements[id] = el;
+      }
+      return elements;
+    }
+
+    beforeEach(async () => {
+      originalDoc = globalThis.document;
+      mockDoc = createMockDocument();
+      globalThis.document = mockDoc;
+      formElements = setupForm(mockDoc);
+
+      adapter = new MemoryStorageAdapter();
+      collectionStore.adapter = adapter;
+      collectionStore.items = [];
+      collectionStore.tags = [];
+      await collectionStore.load();
+    });
+
+    afterEach(() => {
+      globalThis.document = originalDoc;
+    });
+
+    it('pre-fills identifier input in edit mode and does not trigger duplicate warning against itself', async () => {
+      const item = await collectionStore.saveItem({
+        title: 'Original Item',
+        url: 'https://example.com/item1',
+        identifier: 'BOOK-001'
+      });
+
+      initAddItemView({});
+      showAddItemView(item.id);
+
+      assert.strictEqual(formElements.itemIdentifierInput.value, 'BOOK-001');
+      assert.strictEqual(formElements.identifierWarning.style.display, 'none');
+    });
+
+    it('renders soft warning containing conflicting item title when entered identifier matches another item', async () => {
+      await collectionStore.saveItem({
+        title: 'Conflicting Book',
+        url: 'https://example.com/conflict',
+        identifier: 'BOOK-999'
+      });
+
+      initAddItemView({});
+      showAddItemView(null);
+
+      formElements.itemIdentifierInput.value = '  book-999  ';
+      formElements.itemIdentifierInput.dispatchEvent({ type: 'input' });
+
+      assert.strictEqual(formElements.identifierWarning.style.display, 'block');
+      assert.match(formElements.identifierWarning.textContent, /Conflicting Book/);
+    });
+
+    it('clears warning when input becomes unique or empty', async () => {
+      await collectionStore.saveItem({
+        title: 'Existing Book',
+        url: 'https://example.com/existing',
+        identifier: 'BOOK-999'
+      });
+
+      initAddItemView({});
+      showAddItemView(null);
+
+      // Trigger conflict
+      formElements.itemIdentifierInput.value = 'BOOK-999';
+      formElements.itemIdentifierInput.dispatchEvent({ type: 'input' });
+      assert.strictEqual(formElements.identifierWarning.style.display, 'block');
+
+      // Change to unique
+      formElements.itemIdentifierInput.value = 'BOOK-1000';
+      formElements.itemIdentifierInput.dispatchEvent({ type: 'input' });
+      assert.strictEqual(formElements.identifierWarning.style.display, 'none');
+      assert.strictEqual(formElements.identifierWarning.textContent, '');
+
+      // Change to empty
+      formElements.itemIdentifierInput.value = '   ';
+      formElements.itemIdentifierInput.dispatchEvent({ type: 'input' });
+      assert.strictEqual(formElements.identifierWarning.style.display, 'none');
+    });
+
+    it('allows saving successfully even with active duplicate warning without disabling save button', async () => {
+      await collectionStore.saveItem({
+        title: 'First Item',
+        url: 'https://example.com/first',
+        identifier: 'SHARED-ID'
+      });
+
+      let saved = false;
+      initAddItemView({
+        onSave: () => { saved = true; }
+      });
+      showAddItemView(null);
+
+      formElements.itemTitleInput.value = 'Second Item';
+      formElements.itemUrlInput.value = 'https://example.com/second';
+      formElements.itemIdentifierInput.value = 'SHARED-ID';
+      formElements.itemIdentifierInput.dispatchEvent({ type: 'input' });
+
+      // Soft warning is active
+      assert.strictEqual(formElements.identifierWarning.style.display, 'block');
+      // Save button remains enabled
+      assert.notStrictEqual(formElements.saveItemButton.disabled, true);
+
+      // Clicking save proceeds normally
+      formElements.saveItemButton.click();
+      await new Promise(resolve => setTimeout(resolve, 10));
+      assert.strictEqual(saved, true);
+
+      const items = collectionStore.getItems();
+      assert.strictEqual(items.length, 2);
+      const secondItem = items.find(i => i.title === 'Second Item');
+      assert.ok(secondItem);
+      assert.strictEqual(secondItem.identifier, 'SHARED-ID');
+    });
+
+    it('defines itemIdentifierInput, identifierWarning, and CSS warning styling in sidebar.html', () => {
+      assert.match(sidebarHtml, /id="itemIdentifierInput"/, 'sidebar.html must contain #itemIdentifierInput');
+      assert.match(sidebarHtml, /id="identifierWarning"/, 'sidebar.html must contain #identifierWarning');
+
+      const warningCssMatch = sidebarHtml.match(/(?:^|[,\s}])([^{}]*\.identifier-warning\b[^{]*)\{([^}]+)\}/);
+      assert.ok(warningCssMatch, 'CSS rule for .identifier-warning should exist in sidebar.html');
+      assert.match(warningCssMatch[2], /color\s*:/i, 'Must define color in .identifier-warning');
+      assert.match(warningCssMatch[2], /background-color\s*:/i, 'Must define background-color in .identifier-warning');
     });
   });
 });

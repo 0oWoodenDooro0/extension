@@ -23,6 +23,7 @@ function isItemContentEqual(a, b) {
   if (a.title !== b.title) return false;
   if (a.url !== b.url) return false;
   if ((a.imageUrl || null) !== (b.imageUrl || null)) return false;
+  if ((a.identifier || null) !== (b.identifier || null)) return false;
   if (!arraysEqual(a.tags, b.tags)) return false;
   if (!arraysEqual(a.actors, b.actors)) return false;
   return true;
