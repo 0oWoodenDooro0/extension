@@ -190,8 +190,6 @@ export async function fetchImageFromHtml(pageUrl) {
 export async function getImageForUrl(url) {
   if (!url) return null;
 
-  let imageUrl = null;
-
   // 1. 優先嘗試比對目前所有開啟的分頁
   try {
     const tabs = await chrome.tabs.query({});
@@ -217,8 +215,7 @@ export async function getImageForUrl(url) {
         });
 
         if (results && results[0] && results[0].result) {
-          imageUrl = results[0].result;
-          return imageUrl;
+          return results[0].result;
         }
       } catch (err) {
         console.warn(`[Background] executeScript failed on tab ${matchedTab.id}:`, err.message);
@@ -229,8 +226,7 @@ export async function getImageForUrl(url) {
   }
 
   // 2. 若無匹配已開啟分頁，透過背景直接 fetch HTML 作為 Fallback
-  imageUrl = await fetchImageFromHtml(url);
-  return imageUrl;
+  return await fetchImageFromHtml(url);
 }
 
 if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
@@ -353,9 +349,9 @@ export async function showSaveFeedback(tab, { isExisting = false, title = '' } =
       setTimeout(() => {
         try {
           chrome.action.setBadgeText({ text: '', tabId: tab.id });
-        } catch (e) {}
+        } catch {}
       }, 2000);
-    } catch (e) {}
+    } catch {}
   }
 
   // 2. 網頁內嵌浮動 Toast HUD 提示
@@ -369,7 +365,7 @@ export async function showSaveFeedback(tab, { isExisting = false, title = '' } =
         func: inPageToast,
         args: [msg, isExisting]
       });
-    } catch (e) {
+    } catch {
       // 忽略受保護網頁的腳本注入錯誤
     }
   }

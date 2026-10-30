@@ -4,6 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test --test-timeout=1000 --import ./tests/setup.js tests/*.test.js"
+    "lint": "eslint .",
+    "test": "node --test --test-timeout=1000 --import ./tests/setup.js tests/*.test.js",
+    "check": "npm run lint && npm test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.14.0",
+    "globals": "^17.13.0"
   }
 }

@@ -171,7 +171,7 @@ document.addEventListener('DOMContentLoaded', async () => {
               alert(`Failed to import backup: ${result.error || 'Invalid format'}`);
             }
           }
-        } catch (err) {
+        } catch {
           alert("Error reading backup file.");
         }
       };
@@ -181,7 +181,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // --- Store Subscription (Multi-window sync and internal event listener) ---
-  collectionStore.subscribe((event) => {
+  collectionStore.subscribe(() => {
     if (currentViewName === 'manage') {
       displayManageTagList();
     } else if (currentViewName === 'items') {

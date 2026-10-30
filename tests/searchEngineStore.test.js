@@ -153,7 +153,7 @@ describe('SearchEngineStore & Context-Menu Search', () => {
       const events = [];
       const unsubscribe = store.subscribe((event) => events.push(event));
 
-      const engine = await store.saveEngine({
+      await store.saveEngine({
         title: 'Local Engine',
         urlTemplate: 'https://local.com?q={query}'
       });

@@ -33,7 +33,7 @@ export class MemoryTabAdapter {
     if (!parsedData && typeof content === 'string' && (mimeType.includes('json') || (filename && filename.endsWith('.json')))) {
       try {
         parsedData = JSON.parse(content);
-      } catch (e) {
+      } catch {
         // ignore non-json string
       }
     }

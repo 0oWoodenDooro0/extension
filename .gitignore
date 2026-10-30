@@ -1,3 +1,5 @@
 /.idea/
 /web-ext-artifacts/
 /.antigravitycli/
+node_modules/
+
