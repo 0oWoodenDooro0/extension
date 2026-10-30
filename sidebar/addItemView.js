@@ -1,5 +1,6 @@
 // addItemView.js - 負責新增與編輯項目的表單邏輯
 import { collectionStore } from './store.js';
+import { identifierRuleStore } from '../identifierRuleStore.js';
 import { tabAdapter } from '../tabAdapter.js';
 
 // --- DOM Elements ---
@@ -43,7 +44,10 @@ export function initAddItemView(injectedCallbacks) {
 
   // 綁定事件
   if (itemIdentifierInput) {
-    itemIdentifierInput.addEventListener('input', checkDuplicateIdentifier);
+    itemIdentifierInput.addEventListener('input', () => {
+      itemIdentifierInput.dataset.autoFilled = 'false';
+      checkDuplicateIdentifier();
+    });
   }
 
   if (fetchImageButton) {
@@ -64,9 +68,22 @@ export function initAddItemView(injectedCallbacks) {
 
   if (itemUrlInput) {
     itemUrlInput.addEventListener('input', () => {
+      const url = itemUrlInput.value.trim();
+      if (
+        url &&
+        itemIdentifierInput &&
+        (!itemIdentifierInput.value || itemIdentifierInput.dataset.autoFilled === 'true')
+      ) {
+        const extracted = identifierRuleStore.extractIdentifier(url);
+        if (extracted) {
+          itemIdentifierInput.value = extracted;
+          itemIdentifierInput.dataset.autoFilled = 'true';
+          checkDuplicateIdentifier();
+        }
+      }
+
       if (urlDebounceTimer) clearTimeout(urlDebounceTimer);
       urlDebounceTimer = setTimeout(() => {
-        const url = itemUrlInput.value.trim();
         // 只有在尚未填寫圖片或圖片為空時自動觸發抓取
         if (url && itemImageUrlInput && !itemImageUrlInput.value) {
           tryFetchImage(url, false);
@@ -105,7 +122,10 @@ export function showAddItemView(itemId = null) {
   // 重置表單
   if (itemTitleInput) itemTitleInput.value = '';
   if (itemUrlInput) itemUrlInput.value = '';
-  if (itemIdentifierInput) itemIdentifierInput.value = '';
+  if (itemIdentifierInput) {
+    itemIdentifierInput.value = '';
+    delete itemIdentifierInput.dataset.autoFilled;
+  }
   if (identifierWarning) {
     identifierWarning.style.display = 'none';
     identifierWarning.textContent = '';
@@ -170,6 +190,15 @@ export function showAddItemView(itemId = null) {
       } else {
         populateTagSelector([]);
         currentEditingActors = [];
+      }
+
+      // 若識別碼尚未填寫，根據規則自動提取
+      if (itemIdentifierInput && !itemIdentifierInput.value && currentTab.url) {
+        const extracted = identifierRuleStore.extractIdentifier(currentTab.url);
+        if (extracted) {
+          itemIdentifierInput.value = extracted;
+          itemIdentifierInput.dataset.autoFilled = 'true';
+        }
       }
 
       renderActorChips();

@@ -2,6 +2,7 @@ import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { CollectionStore, MemoryStorageAdapter as CollectionMemoryAdapter } from '../sidebar/store.js';
 import { SearchEngineStore, MemoryStorageAdapter as SearchEngineMemoryAdapter } from '../searchEngineStore.js';
+import { IdentifierRuleStore, MemoryStorageAdapter as IdentifierMemoryAdapter } from '../identifierRuleStore.js';
 import { MemoryTabAdapter } from '../tabAdapter.js';
 import {
   createUnifiedBackup,
@@ -13,11 +14,13 @@ import {
 describe('Unified Backup Coordinator', () => {
   let collectionStore;
   let searchEngineStore;
+  let identifierRuleStore;
   let tabAdapter;
 
   beforeEach(() => {
     collectionStore = new CollectionStore(new CollectionMemoryAdapter());
     searchEngineStore = new SearchEngineStore(new SearchEngineMemoryAdapter());
+    identifierRuleStore = new IdentifierRuleStore(new IdentifierMemoryAdapter());
     tabAdapter = new MemoryTabAdapter();
   });
 
@@ -42,7 +45,7 @@ describe('Unified Backup Coordinator', () => {
       );
     });
 
-    it('rejects non-objects or Unified Backups with malformed items, tags, or searchEngines arrays', () => {
+    it('rejects non-objects or Unified Backups with malformed items, tags, searchEngines, or identifierRules arrays', () => {
       assert.strictEqual(validateBackupPayload(null).valid, false);
       assert.strictEqual(validateBackupPayload([]).valid, false);
       assert.strictEqual(validateBackupPayload({ tags: [] }).valid, false);
@@ -55,6 +58,14 @@ describe('Unified Backup Coordinator', () => {
       });
       assert.strictEqual(invalidEngines.valid, false);
       assert.match(invalidEngines.error, /searchEngines/i);
+
+      const invalidRules = validateBackupPayload({
+        items: [],
+        tags: [],
+        identifierRules: 'not-an-array'
+      });
+      assert.strictEqual(invalidRules.valid, false);
+      assert.match(invalidRules.error, /identifierRules/i);
     });
   });
 
@@ -74,8 +85,13 @@ describe('Unified Backup Coordinator', () => {
         queryRegex: 'GH-(\\d+)',
         queryReplacement: '$1'
       });
+      await identifierRuleStore.saveRule({
+        name: 'GitHub Issues',
+        urlPattern: 'github.com',
+        extractionRegex: 'issues/(\\d+)'
+      });
 
-      const backup = await createUnifiedBackup(collectionStore, searchEngineStore);
+      const backup = await createUnifiedBackup(collectionStore, searchEngineStore, identifierRuleStore);
 
       assert.strictEqual(backup.version, 1);
       assert.strictEqual(backup.items.length, 1);
@@ -84,12 +100,16 @@ describe('Unified Backup Coordinator', () => {
       assert.deepStrictEqual(backup.tags, ['Tech']);
       assert.strictEqual(backup.searchEngines.length, 1);
       assert.strictEqual(backup.searchEngines[0].title, 'GitHub Search');
+      assert.strictEqual(backup.identifierRules.length, 1);
+      assert.strictEqual(backup.identifierRules[0].name, 'GitHub Issues');
 
       // Mutating the returned backup must not mutate store state
       backup.tags.push('MutatedTag');
       backup.searchEngines[0].title = 'Mutated Title';
+      backup.identifierRules[0].name = 'Mutated Rule';
       assert.deepStrictEqual(collectionStore.getTags(), ['Tech']);
       assert.strictEqual(searchEngineStore.getEngines()[0].title, 'GitHub Search');
+      assert.strictEqual(identifierRuleStore.getRules()[0].name, 'GitHub Issues');
     });
   });
 
@@ -117,27 +137,45 @@ describe('Unified Backup Coordinator', () => {
             queryRegex: null,
             queryReplacement: null
           }
+        ],
+        identifierRules: [
+          {
+            id: 'rule-101',
+            name: 'Restored Rule',
+            extractionRegex: 'item-(\\d+)',
+            captureGroup: 1,
+            enabled: true
+          }
         ]
       };
 
       let collectionNotified = false;
       let searchEngineNotified = false;
+      let identifierRuleNotified = false;
       collectionStore.subscribe(() => { collectionNotified = true; });
       searchEngineStore.subscribe(() => { searchEngineNotified = true; });
+      identifierRuleStore.subscribe(() => { identifierRuleNotified = true; });
 
-      const result = await restoreUnifiedBackup(fullBackup, { collectionStore, searchEngineStore });
+      const result = await restoreUnifiedBackup(fullBackup, {
+        collectionStore,
+        searchEngineStore,
+        identifierRuleStore
+      });
 
       assert.strictEqual(result.success, true);
       assert.deepStrictEqual(result.restored, {
         itemsCount: 1,
         tagsCount: 1,
-        searchEnginesCount: 1
+        searchEnginesCount: 1,
+        identifierRulesCount: 1
       });
       assert.strictEqual(collectionStore.getItemById('item-101')?.title, 'Restored Item');
       assert.strictEqual(collectionStore.getItemById('item-101')?.identifier, 'REST-001');
       assert.strictEqual(searchEngineStore.getEngineById('engine-101')?.title, 'Restored Engine');
+      assert.strictEqual(identifierRuleStore.getRuleById('rule-101')?.name, 'Restored Rule');
       assert.strictEqual(collectionNotified, true);
       assert.strictEqual(searchEngineNotified, true);
+      assert.strictEqual(identifierRuleNotified, true);
     });
 
     it('preserves existing Search Engines when restoring a legacy backup without searchEngines, but overwrites when searchEngines is explicitly empty', async () => {
