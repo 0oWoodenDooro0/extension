@@ -1,4 +1,5 @@
 import { searchEngineStore } from '../searchEngineStore.js';
+import { identifierRuleStore, extractIdentifierFromUrl } from '../identifierRuleStore.js';
 
 document.addEventListener("DOMContentLoaded", async () => {
     // 建立 Popup 生命週期連線至 background.js，關閉 Popup 時自動觸發背景 Flush Sync
@@ -27,7 +28,32 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
     });
 
-    // UI Elements
+    // --- Tab Navigation ---
+    const tabShortcutsBtn = document.getElementById("tabShortcutsBtn");
+    const tabRulesBtn = document.getElementById("tabRulesBtn");
+    const shortcutsSection = document.getElementById("shortcutsSection");
+    const rulesSection = document.getElementById("rulesSection");
+
+    function switchTab(target) {
+        if (target === 'shortcuts') {
+            tabShortcutsBtn.classList.add("active");
+            tabRulesBtn.classList.remove("active");
+            shortcutsSection.classList.add("active");
+            rulesSection.classList.remove("active");
+        } else {
+            tabRulesBtn.classList.add("active");
+            tabShortcutsBtn.classList.remove("active");
+            rulesSection.classList.add("active");
+            shortcutsSection.classList.remove("active");
+        }
+    }
+
+    tabShortcutsBtn.addEventListener("click", () => switchTab('shortcuts'));
+    tabRulesBtn.addEventListener("click", () => switchTab('rules'));
+
+    // ==========================================
+    // 1. Search Shortcuts Manager
+    // ==========================================
     const listView = document.getElementById("listView");
     const formView = document.getElementById("formView");
     const shortcutsList = document.getElementById("shortcutsList");
@@ -46,7 +72,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     const cancelBtn = document.getElementById("cancelBtn");
     const saveBtn = document.getElementById("saveBtn");
 
-    // Render Search Shortcut Cards
     function renderList() {
         shortcutsList.innerHTML = "";
         const searchEngines = searchEngineStore.getEngines();
@@ -59,17 +84,17 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         searchEngines.forEach((engine) => {
             const card = document.createElement("li");
-            card.className = "shortcut-card";
+            card.className = "card-item";
 
             const info = document.createElement("div");
-            info.className = "shortcut-info";
+            info.className = "card-info";
 
             const title = document.createElement("div");
-            title.className = "shortcut-title";
+            title.className = "card-title";
             title.textContent = engine.title;
 
             const url = document.createElement("div");
-            url.className = "shortcut-meta";
+            url.className = "card-meta";
             url.textContent = engine.urlTemplate;
 
             info.appendChild(title);
@@ -77,7 +102,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
             if (engine.queryRegex) {
                 const regexMeta = document.createElement("div");
-                regexMeta.className = "shortcut-regex";
+                regexMeta.className = "card-tag";
                 regexMeta.textContent = `Regex: /${engine.queryRegex}/ → ${engine.queryReplacement || ''}`;
                 info.appendChild(regexMeta);
             }
@@ -103,7 +128,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
     }
 
-    // View Swappers
     function openForm(engine = null) {
         listView.classList.remove("active");
         formView.classList.add("active");
@@ -131,7 +155,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         listView.classList.add("active");
     }
 
-    // Form Save Actions
     async function saveForm() {
         const title = engineTitleInput.value.trim();
         const url = engineUrlInput.value.trim();
@@ -160,7 +183,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
     }
 
-    // Delete Shortcut Engine
     async function deleteEngine(id) {
         if (confirm("Are you sure you want to delete this search shortcut?")) {
             const success = await searchEngineStore.deleteEngine(id);
@@ -170,21 +192,223 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
     }
 
-    // Event Listeners
     addBtn.addEventListener("click", () => openForm());
     cancelBtn.addEventListener("click", closeForm);
     saveBtn.addEventListener("click", saveForm);
 
-    // Subscribe to store updates (external sync)
     searchEngineStore.subscribe(() => {
         renderList();
     });
 
-    // Initial Load
+    // ==========================================
+    // 2. URL Identifier Rules Manager
+    // ==========================================
+    const ruleListView = document.getElementById("ruleListView");
+    const ruleFormView = document.getElementById("ruleFormView");
+    const ruleList = document.getElementById("ruleList");
+    const ruleEmptyState = document.getElementById("ruleEmptyState");
+
+    // Rule Form Inputs
+    const ruleFormTitle = document.getElementById("ruleFormTitle");
+    const ruleIdInput = document.getElementById("ruleId");
+    const ruleNameInput = document.getElementById("ruleName");
+    const rulePatternInput = document.getElementById("rulePattern");
+    const ruleRegexInput = document.getElementById("ruleRegex");
+    const ruleReplacementInput = document.getElementById("ruleReplacement");
+    const ruleTestUrlInput = document.getElementById("ruleTestUrl");
+    const ruleTestPreview = document.getElementById("ruleTestPreview");
+
+    // Rule Buttons
+    const ruleAddBtn = document.getElementById("ruleAddBtn");
+    const ruleCancelBtn = document.getElementById("ruleCancelBtn");
+    const ruleSaveBtn = document.getElementById("ruleSaveBtn");
+
+    function renderRuleList() {
+        ruleList.innerHTML = "";
+        const rules = identifierRuleStore.getRules();
+
+        if (rules.length === 0) {
+            ruleEmptyState.style.display = "block";
+            return;
+        }
+        ruleEmptyState.style.display = "none";
+
+        rules.forEach((rule) => {
+            const card = document.createElement("li");
+            card.className = "card-item";
+
+            const info = document.createElement("div");
+            info.className = "card-info";
+
+            const title = document.createElement("div");
+            title.className = "card-title";
+            title.textContent = rule.name || "Untitled Rule";
+
+            const patternMeta = document.createElement("div");
+            patternMeta.className = "card-meta";
+            patternMeta.textContent = `Pattern: ${rule.urlPattern}`;
+
+            info.appendChild(title);
+            info.appendChild(patternMeta);
+
+            if (rule.extractionRegex) {
+                const regexTag = document.createElement("div");
+                regexTag.className = "card-tag";
+                const targetText = rule.replacementTemplate
+                    ? ` → ${rule.replacementTemplate}`
+                    : ` → $${rule.captureGroup || 1}`;
+                regexTag.textContent = `Regex: /${rule.extractionRegex}/${targetText}`;
+                info.appendChild(regexTag);
+            }
+
+            const actions = document.createElement("div");
+            actions.className = "actions";
+
+            const editBtn = document.createElement("button");
+            editBtn.textContent = "Edit";
+            editBtn.addEventListener("click", () => openRuleForm(rule));
+
+            const deleteBtn = document.createElement("button");
+            deleteBtn.textContent = "Delete";
+            deleteBtn.className = "btn-danger";
+            deleteBtn.addEventListener("click", () => deleteRule(rule.id));
+
+            actions.appendChild(editBtn);
+            actions.appendChild(deleteBtn);
+
+            card.appendChild(info);
+            card.appendChild(actions);
+            ruleList.appendChild(card);
+        });
+    }
+
+    function updateLivePreview() {
+        const testUrl = ruleTestUrlInput.value.trim();
+        const pattern = rulePatternInput.value.trim();
+        const regexStr = ruleRegexInput.value.trim();
+        const replacement = ruleReplacementInput.value.trim() || null;
+
+        if (!testUrl) {
+            ruleTestPreview.textContent = "(Enter matching URL to test)";
+            ruleTestPreview.style.color = "#718096";
+            return;
+        }
+
+        if (!pattern || !regexStr) {
+            ruleTestPreview.textContent = "(Enter URL Pattern and Regex to preview)";
+            ruleTestPreview.style.color = "#718096";
+            return;
+        }
+
+        try {
+            const tempRule = {
+                urlPattern: pattern,
+                extractionRegex: regexStr,
+                replacementTemplate: replacement,
+                enabled: true
+            };
+            const extracted = extractIdentifierFromUrl(testUrl, [tempRule]);
+            if (extracted) {
+                ruleTestPreview.textContent = `✓ Extracted: "${extracted}"`;
+                ruleTestPreview.style.color = "#2b6cb0";
+            } else {
+                ruleTestPreview.textContent = "✗ No match for this URL";
+                ruleTestPreview.style.color = "#e53e3e";
+            }
+        } catch (err) {
+            ruleTestPreview.textContent = `Error: ${err.message}`;
+            ruleTestPreview.style.color = "#e53e3e";
+        }
+    }
+
+    ruleTestUrlInput.addEventListener("input", updateLivePreview);
+    rulePatternInput.addEventListener("input", updateLivePreview);
+    ruleRegexInput.addEventListener("input", updateLivePreview);
+    ruleReplacementInput.addEventListener("input", updateLivePreview);
+
+    function openRuleForm(rule = null) {
+        ruleListView.classList.remove("active");
+        ruleFormView.classList.add("active");
+
+        if (rule) {
+            ruleFormTitle.textContent = "Edit Identifier Rule";
+            ruleIdInput.value = rule.id;
+            ruleNameInput.value = rule.name || "";
+            rulePatternInput.value = rule.urlPattern || "";
+            ruleRegexInput.value = rule.extractionRegex || "";
+            ruleReplacementInput.value = rule.replacementTemplate || "";
+            ruleTestUrlInput.value = "";
+        } else {
+            ruleFormTitle.textContent = "Add Identifier Rule";
+            ruleIdInput.value = "";
+            ruleNameInput.value = "";
+            rulePatternInput.value = "";
+            ruleRegexInput.value = "";
+            ruleReplacementInput.value = "";
+            ruleTestUrlInput.value = "";
+        }
+        updateLivePreview();
+        ruleNameInput.focus();
+    }
+
+    function closeRuleForm() {
+        ruleFormView.classList.remove("active");
+        ruleListView.classList.add("active");
+    }
+
+    async function saveRuleForm() {
+        const name = ruleNameInput.value.trim();
+        const pattern = rulePatternInput.value.trim();
+        const regexStr = ruleRegexInput.value.trim();
+        const replacement = ruleReplacementInput.value.trim() || null;
+        const id = ruleIdInput.value || null;
+
+        if (!name || !pattern || !regexStr) {
+            alert("Rule Name, URL Pattern, and Extraction Regex are required!");
+            return;
+        }
+
+        try {
+            await identifierRuleStore.saveRule({
+                id,
+                name,
+                urlPattern: pattern,
+                extractionRegex: regexStr,
+                replacementTemplate: replacement
+            });
+            closeRuleForm();
+            renderRuleList();
+        } catch (err) {
+            alert(`Error saving identifier rule: ${err.message}`);
+        }
+    }
+
+    async function deleteRule(id) {
+        if (confirm("Are you sure you want to delete this identifier rule?")) {
+            const success = await identifierRuleStore.deleteRule(id);
+            if (success) {
+                renderRuleList();
+            }
+        }
+    }
+
+    ruleAddBtn.addEventListener("click", () => openRuleForm());
+    ruleCancelBtn.addEventListener("click", closeRuleForm);
+    ruleSaveBtn.addEventListener("click", saveRuleForm);
+
+    identifierRuleStore.subscribe(() => {
+        renderRuleList();
+    });
+
+    // --- Initial Load ---
     try {
-        await searchEngineStore.load();
+        await Promise.all([
+            searchEngineStore.load(),
+            identifierRuleStore.load()
+        ]);
         renderList();
+        renderRuleList();
     } catch (err) {
-        console.error("Failed to load search engine store:", err);
+        console.error("Failed to load stores:", err);
     }
 });

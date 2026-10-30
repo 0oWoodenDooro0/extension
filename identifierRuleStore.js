@@ -58,7 +58,13 @@ export function extractIdentifierFromUrl(url, rules) {
       if (!match) continue;
 
       let extracted = null;
-      if (rule.captureGroup !== undefined && match[rule.captureGroup] !== undefined) {
+      if (
+        rule.replacementTemplate !== undefined &&
+        rule.replacementTemplate !== null &&
+        typeof rule.replacementTemplate === 'string'
+      ) {
+        extracted = match[0].replace(regex, rule.replacementTemplate);
+      } else if (rule.captureGroup !== undefined && match[rule.captureGroup] !== undefined) {
         extracted = match[rule.captureGroup];
       } else if (match[1] !== undefined) {
         extracted = match[1];
@@ -184,10 +190,22 @@ export class IdentifierRuleStore {
   /**
    * 新增或更新識別碼提取規則
    */
-  async saveRule({ id, name, urlPattern, extractionRegex, captureGroup = 1, enabled = true }) {
+  async saveRule({
+    id,
+    name,
+    urlPattern,
+    extractionRegex,
+    captureGroup = 1,
+    replacementTemplate = null,
+    enabled = true
+  }) {
     const cleanName = (name || '').trim();
     const cleanRegex = (extractionRegex || '').trim();
     const cleanPattern = (urlPattern || '').trim();
+    const cleanReplacement =
+      typeof replacementTemplate === 'string' && replacementTemplate.trim() !== ''
+        ? replacementTemplate.trim()
+        : null;
 
     if (!cleanRegex || !cleanPattern) {
       throw new Error('Rule extractionRegex and urlPattern are required.');
@@ -204,6 +222,7 @@ export class IdentifierRuleStore {
       targetRule.urlPattern = cleanPattern;
       targetRule.extractionRegex = cleanRegex;
       targetRule.captureGroup = typeof captureGroup === 'number' ? captureGroup : 1;
+      targetRule.replacementTemplate = cleanReplacement;
       targetRule.enabled = enabled !== false;
       targetRule.updatedAt = now;
     } else {
@@ -213,6 +232,7 @@ export class IdentifierRuleStore {
         urlPattern: cleanPattern,
         extractionRegex: cleanRegex,
         captureGroup: typeof captureGroup === 'number' ? captureGroup : 1,
+        replacementTemplate: cleanReplacement,
         enabled: enabled !== false,
         updatedAt: now
       };

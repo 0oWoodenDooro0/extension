@@ -149,6 +149,36 @@ describe('Identifier URL Regex Extraction Engine', () => {
       assert.strictEqual(result, '999');
     });
 
+    it('supports replacementTemplate to compose multiple regex capture groups into an identifier', () => {
+      const rules = [
+        {
+          id: 'rule-composite',
+          name: 'Composite Rule',
+          urlPattern: 'shop.example.com',
+          extractionRegex: 'products/([a-zA-Z]+)/([0-9]+)',
+          replacementTemplate: '$1-$2'
+        }
+      ];
+      const url = 'https://shop.example.com/products/shoes/49821';
+      const result = extractIdentifierFromUrl(url, rules);
+      assert.strictEqual(result, 'shoes-49821');
+    });
+
+    it('supports custom string prefixes and combinations in replacementTemplate', () => {
+      const rules = [
+        {
+          id: 'rule-prefix',
+          name: 'Prefixed Rule',
+          urlPattern: 'archive.org',
+          extractionRegex: 'item/([a-z0-9]+)',
+          replacementTemplate: 'ARC_$1'
+        }
+      ];
+      const url = 'https://archive.org/item/vol123';
+      const result = extractIdentifierFromUrl(url, rules);
+      assert.strictEqual(result, 'ARC_vol123');
+    });
+
     it('handles malformed regex safely without throwing and falls back to null', () => {
       const rules = [
         {
@@ -227,10 +257,15 @@ describe('Identifier URL Regex Extraction Engine', () => {
         id: rule.id,
         name: 'GitHub Issues & Pulls',
         urlPattern: 'github.com',
-        extractionRegex: '(?:issues|pull)/(\\d+)'
+        extractionRegex: '(?:issues|pull)/(\\d+)',
+        replacementTemplate: 'GH-$1'
       });
       assert.strictEqual(store.getRules().length, 1);
       assert.strictEqual(store.getRules()[0].name, 'GitHub Issues & Pulls');
+      assert.strictEqual(store.getRules()[0].replacementTemplate, 'GH-$1');
+
+      const updatedStored = await memoryAdapter.get('identifierRules');
+      assert.strictEqual(updatedStored.identifierRules[0].replacementTemplate, 'GH-$1');
 
       // 3. Delete
       const deleted = await store.deleteRule(rule.id);

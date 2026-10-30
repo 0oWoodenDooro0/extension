@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Search Shortcuts Settings</title>
+    <title>Extension Settings</title>
     <style>
         html, body {
-            width: 420px;
-            height: 500px;
+            width: 440px;
+            height: 520px;
             margin: 0;
             padding: 0;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -14,6 +14,55 @@
             background-color: #f8f9fa;
             color: #333;
             user-select: none;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .tabs-header {
+            display: flex;
+            background: #edf2f7;
+            border-bottom: 1px solid #cbd5e0;
+            padding: 6px 12px 0 12px;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: 1px solid transparent;
+            border-bottom: 2px solid transparent;
+            border-radius: 6px 6px 0 0;
+            padding: 7px 14px;
+            font-size: 13px;
+            font-weight: 500;
+            color: #4a5568;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .tab-btn:hover {
+            color: #2b6cb0;
+            background: rgba(255, 255, 255, 0.6);
+        }
+
+        .tab-btn.active {
+            color: #2b6cb0;
+            background: white;
+            border-color: #cbd5e0 #cbd5e0 transparent #cbd5e0;
+            border-bottom: 2px solid #3182ce;
+            font-weight: 600;
+        }
+
+        .section-container {
+            display: none;
+            flex-direction: column;
+            flex-grow: 1;
+            height: calc(100% - 37px);
+            overflow: hidden;
+        }
+
+        .section-container.active {
+            display: flex;
         }
         
         .view {
@@ -40,7 +89,7 @@
 
         .toolbar h3 {
             margin: 0;
-            font-size: 16px;
+            font-size: 15px;
             font-weight: 600;
         }
 
@@ -66,7 +115,7 @@
         }
 
         /* List View Elements */
-        .shortcut-list {
+        .item-list {
             list-style: none;
             padding: 0;
             margin: 0;
@@ -75,7 +124,7 @@
             gap: 12px;
         }
 
-        .shortcut-card {
+        .card-item {
             background: white;
             border: 1px solid #e2e8f0;
             border-radius: 6px;
@@ -86,33 +135,33 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
         }
 
-        .shortcut-info {
+        .card-info {
             min-width: 0;
             flex-grow: 1;
             padding-right: 12px;
         }
 
-        .shortcut-title {
-            font-weight: 500;
-            font-size: 14px;
+        .card-title {
+            font-weight: 600;
+            font-size: 13px;
             margin-bottom: 4px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
 
-        .shortcut-meta {
+        .card-meta {
             font-size: 11px;
             color: #666;
             word-break: break-all;
             margin-bottom: 2px;
         }
 
-        .shortcut-regex {
+        .card-tag {
             font-size: 10px;
             color: #4a5568;
             background-color: #edf2f7;
-            padding: 2px 5px;
+            padding: 2px 6px;
             border-radius: 3px;
             display: inline-block;
             margin-top: 4px;
@@ -130,13 +179,13 @@
         .form-container {
             display: flex;
             flex-direction: column;
-            gap: 14px;
+            gap: 12px;
         }
 
         .form-group {
             display: flex;
             flex-direction: column;
-            gap: 5px;
+            gap: 4px;
         }
 
         .form-group label {
@@ -147,11 +196,11 @@
 
         .form-group input {
             width: 100%;
-            padding: 8px;
+            padding: 7px 9px;
             box-sizing: border-box;
             border: 1px solid #cbd5e0;
             border-radius: 4px;
-            font-size: 13px;
+            font-size: 12px;
             outline: none;
             background-color: white;
         }
@@ -159,6 +208,29 @@
         .form-group input:focus {
             border-color: #3182ce;
             box-shadow: 0 0 0 1px #3182ce;
+        }
+
+        .preview-box {
+            background-color: #f7fafc;
+            border: 1px dashed #cbd5e0;
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 4px;
+        }
+
+        .preview-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #718096;
+            margin-bottom: 4px;
+        }
+
+        .preview-value {
+            font-size: 12px;
+            font-family: monospace;
+            color: #2b6cb0;
+            word-break: break-all;
+            min-height: 16px;
         }
 
         /* Buttons */
@@ -219,49 +291,114 @@
     </style>
 </head>
 <body>
-    <!-- List View -->
-    <div id="listView" class="view active">
-        <div class="toolbar">
-            <h3>Search Shortcuts</h3>
-            <button id="addBtn" class="btn-primary">Add New</button>
+    <div class="tabs-header">
+        <button id="tabShortcutsBtn" class="tab-btn active">Search Shortcuts</button>
+        <button id="tabRulesBtn" class="tab-btn">Identifier Rules</button>
+    </div>
+
+    <!-- Section: Search Shortcuts -->
+    <div id="shortcutsSection" class="section-container active">
+        <!-- List View -->
+        <div id="listView" class="view active">
+            <div class="toolbar">
+                <h3>Search Shortcuts</h3>
+                <button id="addBtn" class="btn-primary">Add New</button>
+            </div>
+            <div class="content">
+                <ul id="shortcutsList" class="item-list"></ul>
+                <div id="emptyState" class="empty-state" style="display: none;">
+                    No search shortcuts configured. Click "Add New" to get started.
+                </div>
+            </div>
         </div>
-        <div class="content">
-            <ul id="shortcutsList" class="shortcut-list"></ul>
-            <div id="emptyState" class="empty-state" style="display: none;">
-                No search shortcuts configured. Click "Add New" to get started.
+
+        <!-- Form View (Add/Edit) -->
+        <div id="formView" class="view">
+            <div class="toolbar">
+                <h3 id="formTitle">Add Search Shortcut</h3>
+            </div>
+            <div class="content">
+                <div class="form-container">
+                    <input type="hidden" id="engineId">
+                    <div class="form-group">
+                        <label for="engineTitle">Shortcut Title</label>
+                        <input type="text" id="engineTitle" placeholder="e.g. Google" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="engineUrl">URL Template (use {id} or {query} placeholder)</label>
+                        <input type="url" id="engineUrl" placeholder="e.g. https://www.google.com/search?q={query}" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="engineRegex">Custom Query Regex (Optional)</label>
+                        <input type="text" id="engineRegex" placeholder="e.g. (*)">
+                    </div>
+                    <div class="form-group">
+                        <label for="engineReplacement">Regex Replacement (Optional)</label>
+                        <input type="text" id="engineReplacement" placeholder="e.g. $1">
+                    </div>
+                </div>
+            </div>
+            <div class="view-footer">
+                <button id="cancelBtn">Cancel</button>
+                <button id="saveBtn" class="btn-primary">Save</button>
             </div>
         </div>
     </div>
 
-    <!-- Form View (Add/Edit) -->
-    <div id="formView" class="view">
-        <div class="toolbar">
-            <h3 id="formTitle">Add Search Shortcut</h3>
-        </div>
-        <div class="content">
-            <div class="form-container">
-                <input type="hidden" id="engineId">
-                <div class="form-group">
-                    <label for="engineTitle">Shortcut Title</label>
-                    <input type="text" id="engineTitle" placeholder="e.g. Google" required>
-                </div>
-                <div class="form-group">
-                    <label for="engineUrl">URL Template (use {id} or {query} placeholder)</label>
-                    <input type="url" id="engineUrl" placeholder="e.g. https://www.google.com/search?q={query}" required>
-                </div>
-                <div class="form-group">
-                    <label for="engineRegex">Custom Query Regex (Optional)</label>
-                    <input type="text" id="engineRegex" placeholder="e.g. (*)">
-                </div>
-                <div class="form-group">
-                    <label for="engineReplacement">Regex Replacement (Optional)</label>
-                    <input type="text" id="engineReplacement" placeholder="e.g. $1">
+    <!-- Section: Identifier Rules -->
+    <div id="rulesSection" class="section-container">
+        <!-- Rules List View -->
+        <div id="ruleListView" class="view active">
+            <div class="toolbar">
+                <h3>URL Identifier Rules</h3>
+                <button id="ruleAddBtn" class="btn-primary">Add Rule</button>
+            </div>
+            <div class="content">
+                <ul id="ruleList" class="item-list"></ul>
+                <div id="ruleEmptyState" class="empty-state" style="display: none;">
+                    No identifier rules configured. Click "Add Rule" to get started.
                 </div>
             </div>
         </div>
-        <div class="view-footer">
-            <button id="cancelBtn">Cancel</button>
-            <button id="saveBtn" class="btn-primary">Save</button>
+
+        <!-- Rule Form View (Add/Edit) -->
+        <div id="ruleFormView" class="view">
+            <div class="toolbar">
+                <h3 id="ruleFormTitle">Add Identifier Rule</h3>
+            </div>
+            <div class="content">
+                <div class="form-container">
+                    <input type="hidden" id="ruleId">
+                    <div class="form-group">
+                        <label for="ruleName">Rule Name</label>
+                        <input type="text" id="ruleName" placeholder="e.g. GitHub Issues" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="rulePattern">Source URL Pattern (Supports * wildcard or domain)</label>
+                        <input type="text" id="rulePattern" placeholder="e.g. github.com or *example.com/item/*" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="ruleRegex">Extraction Regex</label>
+                        <input type="text" id="ruleRegex" placeholder="e.g. issues/(\d+) or products/([a-z]+)/([0-9]+)" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="ruleReplacement">Replacement Template (Optional, e.g. $1-$2 or ID-$1)</label>
+                        <input type="text" id="ruleReplacement" placeholder="e.g. $1-$2 (defaults to first capture group)">
+                    </div>
+                    <div class="form-group">
+                        <label for="ruleTestUrl">Test URL (Instant Preview)</label>
+                        <input type="url" id="ruleTestUrl" placeholder="Paste a sample URL to test extraction...">
+                    </div>
+                    <div class="preview-box">
+                        <div class="preview-label">Extracted Identifier Preview:</div>
+                        <div id="ruleTestPreview" class="preview-value">(Enter matching URL to test)</div>
+                    </div>
+                </div>
+            </div>
+            <div class="view-footer">
+                <button id="ruleCancelBtn">Cancel</button>
+                <button id="ruleSaveBtn" class="btn-primary">Save Rule</button>
+            </div>
         </div>
     </div>
 
