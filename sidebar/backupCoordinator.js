@@ -23,42 +23,52 @@ export function validateBackupPayload(payload) {
     return { valid: false, error: 'Invalid backup format: searchEngines must be an array when present.' };
   }
 
+  if (payload.identifierRules !== undefined && !Array.isArray(payload.identifierRules)) {
+    return { valid: false, error: 'Invalid backup format: identifierRules must be an array when present.' };
+  }
+
   return { valid: true, error: null };
 }
 
 /**
- * 生成包含 Collection 與 SearchEngine 的統一備份快照 (深拷貝)
+ * 生成包含 Collection、SearchEngine 與 IdentifierRule 的統一備份快照 (深拷貝)
  * 強制重新從底層 Storage 載入最新資料，確保不會讀取到跨視窗的過期記憶體快取
  * @param {Object} collectionStore 
  * @param {Object} searchEngineStore 
+ * @param {Object} [identifierRuleStore=null]
  * @returns {Promise<Object>}
  */
-export async function createUnifiedBackup(collectionStore, searchEngineStore) {
+export async function createUnifiedBackup(collectionStore, searchEngineStore, identifierRuleStore = null) {
   if (collectionStore && typeof collectionStore.load === 'function') {
     await collectionStore.load();
   }
   if (searchEngineStore && typeof searchEngineStore.load === 'function') {
     await searchEngineStore.load();
   }
+  if (identifierRuleStore && typeof identifierRuleStore.load === 'function') {
+    await identifierRuleStore.load();
+  }
 
   const collectionData = collectionStore ? collectionStore.exportData() : { items: [], tags: [] };
   const searchEngineData = searchEngineStore ? searchEngineStore.exportData() : { searchEngines: [] };
+  const identifierRuleData = identifierRuleStore ? identifierRuleStore.exportData() : { identifierRules: [] };
 
   return {
     version: 1,
     items: JSON.parse(JSON.stringify(collectionData.items || [])),
     tags: JSON.parse(JSON.stringify(collectionData.tags || [])),
-    searchEngines: JSON.parse(JSON.stringify(searchEngineData.searchEngines || []))
+    searchEngines: JSON.parse(JSON.stringify(searchEngineData.searchEngines || [])),
+    identifierRules: JSON.parse(JSON.stringify(identifierRuleData.identifierRules || []))
   };
 }
 
 /**
- * 復原統一備份資料至 CollectionStore 與 SearchEngineStore
+ * 復原統一備份資料至 CollectionStore、SearchEngineStore 與 IdentifierRuleStore
  * @param {Object} payload 
- * @param {{ collectionStore: Object, searchEngineStore: Object }} stores 
- * @returns {Promise<{ success: boolean, restored?: Object, error?: string }>
+ * @param {{ collectionStore: Object, searchEngineStore: Object, identifierRuleStore?: Object }} stores 
+ * @returns {Promise<{ success: boolean, restored?: Object, error?: string }>}
  */
-export async function restoreUnifiedBackup(payload, { collectionStore, searchEngineStore }) {
+export async function restoreUnifiedBackup(payload, { collectionStore, searchEngineStore, identifierRuleStore = null }) {
   const validation = validateBackupPayload(payload);
   if (!validation.valid) {
     return { success: false, error: validation.error };
@@ -69,6 +79,9 @@ export async function restoreUnifiedBackup(payload, { collectionStore, searchEng
   }
   if (searchEngineStore && typeof searchEngineStore.load === 'function') {
     await searchEngineStore.load();
+  }
+  if (identifierRuleStore && typeof identifierRuleStore.load === 'function') {
+    await identifierRuleStore.load();
   }
 
   const collSuccess = await collectionStore.importData(payload);
@@ -85,13 +98,27 @@ export async function restoreUnifiedBackup(payload, { collectionStore, searchEng
     searchEnginesCount = payload.searchEngines.length;
   }
 
+  let identifierRulesCount = null;
+  if (Array.isArray(payload.identifierRules) && identifierRuleStore) {
+    const irSuccess = await identifierRuleStore.importData(payload);
+    if (!irSuccess) {
+      return { success: false, error: 'Failed to import identifier rules into identifier rule store.' };
+    }
+    identifierRulesCount = payload.identifierRules.length;
+  }
+
+  const restored = {
+    itemsCount: payload.items.length,
+    tagsCount: payload.tags.length,
+    searchEnginesCount
+  };
+  if (identifierRulesCount !== null) {
+    restored.identifierRulesCount = identifierRulesCount;
+  }
+
   return {
     success: true,
-    restored: {
-      itemsCount: payload.items.length,
-      tagsCount: payload.tags.length,
-      searchEnginesCount
-    }
+    restored
   };
 }
 
@@ -101,10 +128,17 @@ export async function restoreUnifiedBackup(payload, { collectionStore, searchEng
  * @param {Object} searchEngineStore 
  * @param {Object} tabAdapter 
  * @param {string|null} customFilename 
+ * @param {Object} [identifierRuleStore=null]
  * @returns {Promise<{ success: boolean, filename: string, data: Object }>}
  */
-export async function exportBackupFile(collectionStore, searchEngineStore, tabAdapter, customFilename = null) {
-  const backupData = await createUnifiedBackup(collectionStore, searchEngineStore);
+export async function exportBackupFile(
+  collectionStore,
+  searchEngineStore,
+  tabAdapter,
+  customFilename = null,
+  identifierRuleStore = null
+) {
+  const backupData = await createUnifiedBackup(collectionStore, searchEngineStore, identifierRuleStore);
   const todayStr = new Date().toISOString().split('T')[0];
   const filename = customFilename || `collection_backup_${todayStr}.json`;
 

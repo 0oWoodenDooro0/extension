@@ -10,6 +10,7 @@ import {
 } from '../sidebar/itemsView.js';
 import { initAddItemView, showAddItemView } from '../sidebar/addItemView.js';
 import { collectionStore, MemoryStorageAdapter } from '../sidebar/store.js';
+import { identifierRuleStore } from '../identifierRuleStore.js';
 import { tabAdapter } from '../tabAdapter.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -805,6 +806,94 @@ describe('Collection Item Card Tag Click-to-Filter & Event Isolation (Ticket #15
       const secondItem = items.find(i => i.title === 'Second Item');
       assert.ok(secondItem);
       assert.strictEqual(secondItem.identifier, 'SHARED-ID');
+    });
+
+    it('auto-populates identifier input when matching URL is entered into itemUrlInput', async () => {
+      await identifierRuleStore.saveRule({
+        name: 'GitHub Issues',
+        urlPattern: 'github.com',
+        extractionRegex: 'issues/(\\d+)'
+      });
+
+      initAddItemView({});
+      showAddItemView(null);
+
+      formElements.itemUrlInput.value = 'https://github.com/0oWoodenDooro0/extension/issues/20';
+      formElements.itemUrlInput.dispatchEvent({ type: 'input' });
+
+      assert.strictEqual(formElements.itemIdentifierInput.value, '20');
+      assert.strictEqual(formElements.identifierWarning.style.display, 'none');
+    });
+
+    it('auto-populates identifier input from active tab URL when opening Add Item view', async () => {
+      await identifierRuleStore.saveRule({
+        name: 'Jira Tickets',
+        urlPattern: 'jira.atlassian.com',
+        extractionRegex: 'browse/([A-Z]+-\\d+)'
+      });
+
+      const originalGetActiveTab = tabAdapter.getActiveTab;
+      tabAdapter.getActiveTab = async () => ({
+        id: 77,
+        title: 'Issue EXT-42',
+        url: 'https://jira.atlassian.com/browse/EXT-42'
+      });
+
+      try {
+        initAddItemView({});
+        showAddItemView(null);
+
+        // Allow microtask resolution for tabAdapter.getActiveTab()
+        await new Promise(resolve => setTimeout(resolve, 10));
+
+        assert.strictEqual(formElements.itemIdentifierInput.value, 'EXT-42');
+        assert.strictEqual(formElements.identifierWarning.style.display, 'none');
+      } finally {
+        tabAdapter.getActiveTab = originalGetActiveTab;
+      }
+    });
+
+    it('auto-populates identifier and immediately triggers duplicate warning if conflicting item exists', async () => {
+      await collectionStore.saveItem({
+        title: 'Existing Conflict Item',
+        url: 'https://other.com/conflict',
+        identifier: 'CONFLICT-88'
+      });
+      await identifierRuleStore.saveRule({
+        name: 'Conflict Rule',
+        extractionRegex: 'token-([A-Z0-9-]+)'
+      });
+
+      initAddItemView({});
+      showAddItemView(null);
+
+      formElements.itemUrlInput.value = 'https://example.com/token-CONFLICT-88';
+      formElements.itemUrlInput.dispatchEvent({ type: 'input' });
+
+      assert.strictEqual(formElements.itemIdentifierInput.value, 'CONFLICT-88');
+      assert.strictEqual(formElements.identifierWarning.style.display, 'block');
+      assert.match(formElements.identifierWarning.textContent, /Existing Conflict Item/);
+    });
+
+    it('does not overwrite manually edited identifier when changing URL', async () => {
+      await identifierRuleStore.saveRule({
+        name: 'GitHub Issues',
+        extractionRegex: 'issues/(\\d+)'
+      });
+
+      initAddItemView({});
+      showAddItemView(null);
+
+      // User manually enters a custom identifier first
+      formElements.itemIdentifierInput.value = 'MANUAL-CUSTOM-ID';
+      formElements.itemIdentifierInput.dispatchEvent({ type: 'input' });
+
+      // User enters URL matching a rule
+      formElements.itemUrlInput.value = 'https://github.com/foo/bar/issues/99';
+      formElements.itemUrlInput.dispatchEvent({ type: 'input' });
+
+      // Must preserve the user's manual input
+      assert.strictEqual(formElements.itemIdentifierInput.value, 'MANUAL-CUSTOM-ID');
     });
 
     it('defines itemIdentifierInput, identifierWarning, and CSS warning styling in sidebar.html', () => {
