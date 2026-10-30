@@ -85,6 +85,9 @@ function setupListEventDelegation() {
 
   // 左鍵點擊：開啟連結
   itemList.addEventListener('click', async (e) => {
+    if (e.target && typeof e.target.closest === 'function' && e.target.closest('.item-tag')) {
+      return;
+    }
     const li = e.target.closest('.listItem');
     if (li && li.dataset.url) {
       tabAdapter.openAdjacent(li.dataset.url);
@@ -226,7 +229,18 @@ function createFilterButton(text, isSelected) {
   return button;
 }
 
-function toggleFilter(filterKey) {
+export function getActiveFilters() {
+  return [...activeFilters];
+}
+
+export function resetFilters() {
+  activeFilters = [];
+  activeActorFilters = [];
+  currentActorFilter = "";
+  if (itemSearchInput) itemSearchInput.value = "";
+}
+
+export function toggleFilter(filterKey) {
   if (filterKey === UNTAGGED_TAG) {
     if (activeFilters.includes(UNTAGGED_TAG)) {
       activeFilters = [];
@@ -268,23 +282,42 @@ function getFilteredItems() {
  * @param {Document} [doc] DOM Document 物件（預設為全域 document）
  * @returns {HTMLElement} 項目卡片 DOM 節點
  */
-export function renderItemElement(item, doc = globalThis.document) {
-  const listItem = doc.createElement('li');
+export function renderItemElement(item, doc = globalThis.document, options = {}) {
+  let actualDoc = doc;
+  let actualOptions = options;
+
+  if (typeof doc === 'function' || (doc && typeof doc.createElement !== 'function')) {
+    actualOptions = doc;
+    actualDoc = globalThis.document;
+  }
+
+  const onTagClick = typeof actualOptions === 'function'
+    ? actualOptions
+    : actualOptions?.onTagClick;
+  const onCardClick = actualOptions?.onCardClick;
+
+  const listItem = actualDoc.createElement('li');
   listItem.className = "listItem";
   listItem.id = `item-${item.id}`;
 
   listItem.dataset.id = item.id;
   listItem.dataset.url = item.url;
 
-  const textContainer = doc.createElement('div');
-  const itemTitleSpan = doc.createElement('span');
+  if (typeof onCardClick === 'function' && typeof listItem.addEventListener === 'function') {
+    listItem.addEventListener('click', (e) => {
+      onCardClick(item.url, e);
+    });
+  }
+
+  const textContainer = actualDoc.createElement('div');
+  const itemTitleSpan = actualDoc.createElement('span');
   itemTitleSpan.className = 'item-title';
   itemTitleSpan.innerText = item.title;
   textContainer.appendChild(itemTitleSpan);
 
   const actors = item.actors || [];
   if (actors.length > 0) {
-    const itemActorSpan = doc.createElement('span');
+    const itemActorSpan = actualDoc.createElement('span');
     itemActorSpan.className = 'item-actor';
     itemActorSpan.innerText = `${actors.join(', ')}`;
     textContainer.appendChild(itemActorSpan);
@@ -294,17 +327,32 @@ export function renderItemElement(item, doc = globalThis.document) {
     ? item.tags.filter(t => typeof t === 'string' && t.trim().length > 0)
     : [];
   if (rawTags.length > 0) {
-    const itemTagsContainer = doc.createElement('div');
+    const itemTagsContainer = actualDoc.createElement('div');
     itemTagsContainer.className = 'item-tags';
     const displayTags = rawTags.slice(0, 3);
     displayTags.forEach((tag, idx) => {
       if (idx > 0) {
-        itemTagsContainer.appendChild(doc.createTextNode(' '));
+        itemTagsContainer.appendChild(actualDoc.createTextNode(' '));
       }
-      const tagSpan = doc.createElement('span');
+      const tagSpan = actualDoc.createElement('span');
       tagSpan.className = 'item-tag';
       const cleanTag = tag.trim();
+      tagSpan.dataset.tag = cleanTag;
       tagSpan.innerText = cleanTag.startsWith('#') ? cleanTag : `#${cleanTag}`;
+
+      if (typeof tagSpan.addEventListener === 'function') {
+        tagSpan.addEventListener('click', (e) => {
+        if (e && typeof e.stopPropagation === 'function') {
+          e.stopPropagation();
+        }
+        if (typeof onTagClick === 'function') {
+          onTagClick(cleanTag, e);
+        } else {
+          toggleFilter(cleanTag);
+        }
+      });
+
+      }
       itemTagsContainer.appendChild(tagSpan);
     });
     textContainer.appendChild(itemTagsContainer);
@@ -313,7 +361,7 @@ export function renderItemElement(item, doc = globalThis.document) {
   listItem.appendChild(textContainer);
 
   if (item.imageUrl) {
-    const itemImage = doc.createElement('img');
+    const itemImage = actualDoc.createElement('img');
     itemImage.className = 'item-image';
     itemImage.src = item.imageUrl;
     itemImage.loading = "lazy";
