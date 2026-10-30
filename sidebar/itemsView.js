@@ -4,14 +4,13 @@ import { tabAdapter } from '../tabAdapter.js';
 import { highlightAndScrollToItem } from './highlightHelper.js';
 
 // --- Local State for this view ---
-let currentTag = "All Items";
 let activeFilters = [];
 let activeActorFilters = [];
 let currentActorFilter = "";
 
 // --- DOM Elements ---
 let itemList, itemSearchInput, tagFilterContainer;
-let actorFilterContainer, actorFilterInput, actorFilterDatalist;
+let actorFilterInput, actorFilterDatalist;
 let addActorFilterButton, selectedActorFiltersContainer;
 let callbacks = {};
 let searchDebounceTimer = null; // 用於搜尋防抖
@@ -25,7 +24,6 @@ export function initItemsView(injectedCallbacks) {
   itemList = document.getElementById('itemList');
   itemSearchInput = document.getElementById('itemSearchInput');
   tagFilterContainer = document.getElementById('tagFilterContainer');
-  actorFilterContainer = document.getElementById('actorFilterContainer');
   actorFilterInput = document.getElementById('actorFilterInput');
   actorFilterDatalist = document.getElementById('actorFilterDatalist');
   addActorFilterButton = document.getElementById('addActorFilterButton');
@@ -119,7 +117,11 @@ function setupListEventDelegation() {
 }
 
 export function displayItemsByTag(tag) {
-  currentTag = tag;
+  if (tag && tag !== "All Items") {
+    activeFilters = [tag];
+  } else {
+    activeFilters = [];
+  }
   populateTagFilterBar();
   populateActorFilterOptions();
   renderActorFilterChips();

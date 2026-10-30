@@ -392,12 +392,12 @@ export class GoogleDriveAdapter {
       try {
         await this.authorize(false);
         return true;
-      } catch (silentErr) {
+      } catch {
         if (allowInteractiveFallback) {
           try {
             await this.authorize(true);
             return true;
-          } catch (interactiveErr) {
+          } catch {
             return false;
           }
         }

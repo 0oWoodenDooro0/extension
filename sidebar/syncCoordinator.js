@@ -755,12 +755,9 @@ export class SyncCoordinator {
     const allowInteractiveFallback =
       options.allowInteractiveFallback !== undefined ? options.allowInteractiveFallback : true;
 
-    let isAuth = false;
-    if (typeof this.cloudAdapter.ensureAuthenticated === 'function') {
-      isAuth = await this.cloudAdapter.ensureAuthenticated({ allowInteractiveFallback });
-    } else {
-      isAuth = await this.cloudAdapter.isAuthenticated();
-    }
+    const isAuth = typeof this.cloudAdapter.ensureAuthenticated === 'function'
+      ? await this.cloudAdapter.ensureAuthenticated({ allowInteractiveFallback })
+      : await this.cloudAdapter.isAuthenticated();
 
     if (!isAuth) {
       const errorMsg = 'Cloud adapter is not authenticated.';
@@ -864,12 +861,9 @@ export class SyncCoordinator {
    * 強制從雲端拉取並覆蓋本地 (Force Download / Pull)
    */
   async pullFromCloud() {
-    let isAuth = false;
-    if (typeof this.cloudAdapter.ensureAuthenticated === 'function') {
-      isAuth = await this.cloudAdapter.ensureAuthenticated({ allowInteractiveFallback: true });
-    } else {
-      isAuth = await this.cloudAdapter.isAuthenticated();
-    }
+    const isAuth = typeof this.cloudAdapter.ensureAuthenticated === 'function'
+      ? await this.cloudAdapter.ensureAuthenticated({ allowInteractiveFallback: true })
+      : await this.cloudAdapter.isAuthenticated();
     if (!isAuth) throw new Error('Not authenticated.');
 
     this._setStatus(SYNC_STATUS.SYNCING, 'Fetching cloud file...');
@@ -908,12 +902,9 @@ export class SyncCoordinator {
    * 強制用本地資料覆蓋雲端 (Force Upload / Push)
    */
   async pushToCloud() {
-    let isAuth = false;
-    if (typeof this.cloudAdapter.ensureAuthenticated === 'function') {
-      isAuth = await this.cloudAdapter.ensureAuthenticated({ allowInteractiveFallback: true });
-    } else {
-      isAuth = await this.cloudAdapter.isAuthenticated();
-    }
+    const isAuth = typeof this.cloudAdapter.ensureAuthenticated === 'function'
+      ? await this.cloudAdapter.ensureAuthenticated({ allowInteractiveFallback: true })
+      : await this.cloudAdapter.isAuthenticated();
     if (!isAuth) throw new Error('Not authenticated.');
 
     this._setStatus(SYNC_STATUS.SYNCING, 'Uploading local data to cloud...');

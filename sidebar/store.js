@@ -325,13 +325,9 @@ export class CollectionStore {
     const cleanImageUrl = imageUrl ? imageUrl.trim() : null;
     const now = Date.now();
 
-    let targetItem = null;
-    if (id) {
-      targetItem = this.items.find(i => i.id === id);
-    } else {
-      // 依據 URL 檢查是否已存在
-      targetItem = this.items.find(i => i.url === cleanUrl);
-    }
+    let targetItem = id
+      ? this.items.find(i => i.id === id)
+      : this.items.find(i => i.url === cleanUrl);
 
     if (targetItem) {
       // 編輯更新現有項目
