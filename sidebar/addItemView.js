@@ -310,7 +310,22 @@ function checkDuplicateIdentifier() {
   const duplicate = collectionStore.findItemByIdentifier(val, editingItemId);
   if (duplicate) {
     identifierWarning.style.display = 'block';
-    identifierWarning.textContent = `⚠️ Identifier already assigned to "${duplicate.title}"`;
+    identifierWarning.textContent = '';
+
+    const warningSpan = document.createElement('span');
+    warningSpan.textContent = `⚠️ Identifier already assigned to "${duplicate.title}". `;
+
+    const inspectLink = document.createElement('a');
+    inspectLink.href = '#';
+    inspectLink.id = 'inspectDuplicateLink';
+    inspectLink.textContent = `Inspect: "${duplicate.title}"`;
+    inspectLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      showAddItemView(duplicate.id);
+    });
+
+    identifierWarning.appendChild(warningSpan);
+    identifierWarning.appendChild(inspectLink);
   } else {
     identifierWarning.style.display = 'none';
     identifierWarning.textContent = '';

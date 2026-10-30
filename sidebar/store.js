@@ -16,7 +16,8 @@ export class MemoryStorageAdapter {
   constructor(initialData = {}) {
     this.data = {
       items: initialData.items ? JSON.parse(JSON.stringify(initialData.items)) : [],
-      tags: initialData.tags ? JSON.parse(JSON.stringify(initialData.tags)) : []
+      tags: initialData.tags ? JSON.parse(JSON.stringify(initialData.tags)) : [],
+      ...JSON.parse(JSON.stringify(initialData))
     };
     this.listeners = [];
   }

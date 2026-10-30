@@ -346,15 +346,20 @@ describe('In-Page DOM Text Scanner & Checkmark Indicator (Ticket #21)', () => {
       assert.strictEqual(badges[1].dataset.itemId, 'item-2');
     });
 
-    it('injects badge directly behind anchor tags without mutating original href or breaking listeners', () => {
+    it('injects badge directly behind matching visible text inside anchor tags without mutating href or breaking listeners', () => {
       const link = dom.createElement('a');
-      link.setAttribute('href', 'https://example.com/spec/DOC-101');
-      link.appendChild(dom.createTextNode('Specification Link'));
+      link.setAttribute('href', 'https://example.com/spec/101');
+      link.appendChild(dom.createTextNode('Specification DOC-101'));
       let linkClicked = false;
       link.addEventListener('click', () => {
         linkClicked = true;
       });
       dom.doc.body.appendChild(link);
+
+      const invisibleLink = dom.createElement('a');
+      invisibleLink.setAttribute('href', 'https://example.com/spec/DOC-101');
+      invisibleLink.appendChild(dom.createTextNode('Invisible Href Only'));
+      dom.doc.body.appendChild(invisibleLink);
 
       const items = [
         { id: 'item-1', title: 'API Documentation 101', identifier: 'DOC-101', url: 'https://example.com/spec/DOC-101' }
@@ -364,13 +369,17 @@ describe('In-Page DOM Text Scanner & Checkmark Indicator (Ticket #21)', () => {
       scanner.scan();
 
       // Original link href must not be mutated
-      assert.strictEqual(link.getAttribute('href'), 'https://example.com/spec/DOC-101');
+      assert.strictEqual(link.getAttribute('href'), 'https://example.com/spec/101');
 
-      // Check badge position: directly behind the link
-      const badge = link.nextSibling;
-      assert.ok(badge, 'Badge should be directly after link');
+      // Check badge position: directly behind visible text inside link
+      const badge = link.querySelector('.collection-identifier-mark');
+      assert.ok(badge, 'Badge should be inside link behind visible text');
       assert.strictEqual(badge.classList.contains('collection-identifier-mark'), true);
       assert.strictEqual(badge.dataset.itemId, 'item-1');
+
+      // Link with only invisible href match must NOT have any badge
+      assert.strictEqual(invisibleLink.querySelector('.collection-identifier-mark'), null);
+      assert.strictEqual(invisibleLink.nextSibling, null);
 
       // Link listener must remain intact
       const clickEvent = { type: 'click', target: link };
@@ -405,7 +414,7 @@ describe('In-Page DOM Text Scanner & Checkmark Indicator (Ticket #21)', () => {
   });
 
   describe('Seam 2: Tooltip Rendering & Click Isolation', () => {
-    it('renders a styled tooltip element with item title and toggles visibility on hover', () => {
+    it('renders a styled tooltip element with item title and relies on CSS hover for visibility', () => {
       const p = dom.createElement('p');
       p.appendChild(dom.createTextNode('Item ISBN-999 is stored.'));
       dom.doc.body.appendChild(p);
@@ -424,12 +433,9 @@ describe('In-Page DOM Text Scanner & Checkmark Indicator (Ticket #21)', () => {
       assert.ok(tooltip, 'Tooltip element must be rendered inside badge');
       assert.strictEqual(tooltip.textContent, 'The Master Algorithm Book', 'Tooltip text matches Collection Item title');
 
-      // Test hover interaction
+      // Assert no speculative mouseenter/mouseleave listeners are attached (no tooltip-visible class)
       badge.dispatchEvent({ type: 'mouseenter', target: badge });
-      assert.strictEqual(badge.classList.contains('tooltip-visible'), true, 'mouseenter should add tooltip-visible class');
-
-      badge.dispatchEvent({ type: 'mouseleave', target: badge });
-      assert.strictEqual(badge.classList.contains('tooltip-visible'), false, 'mouseleave should remove tooltip-visible class');
+      assert.strictEqual(badge.classList.contains('tooltip-visible'), false, 'mouseenter should not add tooltip-visible class because CSS hover is used');
     });
 
     it('clicking badge stops propagation, prevents default navigation, and dispatches revealItem message', () => {

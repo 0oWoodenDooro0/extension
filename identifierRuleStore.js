@@ -1,5 +1,7 @@
 // identifierRuleStore.js - URL 正規表達式識別碼提取引擎與規則存儲模組
 // 支援可配置的 URL 匹配模式與捕獲組正規表達式提取規則，以及跨視窗同步與備份
+import { MemoryStorageAdapter, ChromeStorageAdapter } from './sidebar/store.js';
+export { MemoryStorageAdapter, ChromeStorageAdapter };
 
 let ruleIdCounter = 0;
 function generateRuleId() {
@@ -8,7 +10,7 @@ function generateRuleId() {
 }
 
 /**
- * 安全比對 URL 與匹配模式 (支援 glob 通配符 * 或正則表達式)
+ * 安全比對 URL 與匹配模式 (支援 glob 通配符 * 或正規表達式)
  * @param {string} url
  * @param {string} pattern
  * @returns {boolean}
@@ -44,16 +46,14 @@ export function extractIdentifierFromUrl(url, rules) {
   for (const rule of rules) {
     if (!rule || typeof rule !== 'object') continue;
     if (rule.enabled === false) continue;
+    if (!rule.extractionRegex || !rule.urlPattern) continue;
 
-    if (rule.urlPattern && !matchUrlPattern(url, rule.urlPattern)) {
+    if (!matchUrlPattern(url, rule.urlPattern)) {
       continue;
     }
 
-    const regexStr = rule.extractionRegex || rule.regex || rule.urlPattern;
-    if (!regexStr || typeof regexStr !== 'string') continue;
-
     try {
-      const regex = new RegExp(regexStr);
+      const regex = new RegExp(rule.extractionRegex);
       const match = url.match(regex);
       if (!match) continue;
 
@@ -83,96 +83,6 @@ export function extractIdentifierFromUrl(url, rules) {
   }
 
   return null;
-}
-
-/**
- * 記憶體存儲適配器 (適用於測試環境與非瀏覽器環境)
- */
-export class MemoryStorageAdapter {
-  constructor(initialData = {}) {
-    this.data = {
-      identifierRules: initialData.identifierRules
-        ? JSON.parse(JSON.stringify(initialData.identifierRules))
-        : []
-    };
-    this.listeners = [];
-  }
-
-  async get(keys) {
-    const keyList = Array.isArray(keys) ? keys : [keys];
-    const result = {};
-    keyList.forEach(key => {
-      if (this.data[key] !== undefined) {
-        result[key] = JSON.parse(JSON.stringify(this.data[key]));
-      }
-    });
-    return result;
-  }
-
-  async set(itemsObject) {
-    const changes = {};
-    for (const [key, val] of Object.entries(itemsObject)) {
-      const oldVal = this.data[key];
-      this.data[key] = JSON.parse(JSON.stringify(val));
-      changes[key] = { oldValue: oldVal, newValue: this.data[key] };
-    }
-    this.listeners.forEach(fn => fn(changes, 'local'));
-  }
-
-  onChanged(callback) {
-    this.listeners.push(callback);
-    return () => {
-      this.listeners = this.listeners.filter(cb => cb !== callback);
-    };
-  }
-}
-
-/**
- * 瀏覽器 Chrome Storage 適配器
- */
-export class ChromeStorageAdapter {
-  async get(keys) {
-    return new Promise((resolve, reject) => {
-      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
-        return resolve({});
-      }
-      chrome.storage.local.get(keys, (result) => {
-        if (chrome.runtime && chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError);
-        } else {
-          resolve(result);
-        }
-      });
-    });
-  }
-
-  async set(itemsObject) {
-    return new Promise((resolve, reject) => {
-      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
-        return resolve();
-      }
-      chrome.storage.local.set(itemsObject, () => {
-        if (chrome.runtime && chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError);
-        } else {
-          resolve();
-        }
-      });
-    });
-  }
-
-  onChanged(callback) {
-    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
-      const listener = (changes, area) => {
-        if (area === 'local') {
-          callback(changes, area);
-        }
-      };
-      chrome.storage.onChanged.addListener(listener);
-      return () => chrome.storage.onChanged.removeListener(listener);
-    }
-    return () => {};
-  }
 }
 
 /**
@@ -274,13 +184,13 @@ export class IdentifierRuleStore {
   /**
    * 新增或更新識別碼提取規則
    */
-  async saveRule({ id, name, title, urlPattern, extractionRegex, regex, captureGroup = 1, enabled = true }) {
-    const cleanName = (name || title || '').trim();
-    const cleanRegex = (extractionRegex || regex || '').trim();
-    const cleanPattern = urlPattern && urlPattern.trim() ? urlPattern.trim() : null;
+  async saveRule({ id, name, urlPattern, extractionRegex, captureGroup = 1, enabled = true }) {
+    const cleanName = (name || '').trim();
+    const cleanRegex = (extractionRegex || '').trim();
+    const cleanPattern = (urlPattern || '').trim();
 
-    if (!cleanRegex && !cleanPattern) {
-      throw new Error('Rule extractionRegex or urlPattern is required.');
+    if (!cleanRegex || !cleanPattern) {
+      throw new Error('Rule extractionRegex and urlPattern are required.');
     }
 
     const now = Date.now();
@@ -292,7 +202,7 @@ export class IdentifierRuleStore {
     if (targetRule) {
       targetRule.name = cleanName || targetRule.name || 'Untitled Rule';
       targetRule.urlPattern = cleanPattern;
-      targetRule.extractionRegex = cleanRegex || targetRule.extractionRegex;
+      targetRule.extractionRegex = cleanRegex;
       targetRule.captureGroup = typeof captureGroup === 'number' ? captureGroup : 1;
       targetRule.enabled = enabled !== false;
       targetRule.updatedAt = now;

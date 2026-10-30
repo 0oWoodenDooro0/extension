@@ -152,6 +152,7 @@ describe('Quick Save Collection Item (saveActiveTabDirectly)', () => {
       const ruleStore = new IdentifierRuleStore(new RuleMemoryAdapter());
       await ruleStore.saveRule({
         name: 'Issue Tracker',
+        urlPattern: 'example.com',
         extractionRegex: 'ticket/([A-Z0-9-]+)'
       });
 

@@ -123,25 +123,11 @@ export class IndicatorScanner {
     tooltip.textContent = item.title || '';
     badge.appendChild(tooltip);
 
-    // Hover tooltip handlers
-    badge.addEventListener('mouseenter', () => {
-      badge.classList.add('tooltip-visible');
-    });
-    badge.addEventListener('mouseleave', () => {
-      badge.classList.remove('tooltip-visible');
-    });
-
     // Click handler with propagation and navigation prevention
     badge.addEventListener('click', (e) => {
-      if (e && typeof e.preventDefault === 'function') {
-        e.preventDefault();
-      }
-      if (e && typeof e.stopPropagation === 'function') {
-        e.stopPropagation();
-      }
-      if (e && typeof e.stopImmediatePropagation === 'function') {
-        e.stopImmediatePropagation();
-      }
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
 
       if (typeof this.onBadgeClick === 'function') {
         this.onBadgeClick(item, e);
@@ -177,7 +163,6 @@ export class IndicatorScanner {
     this.isScanning = true;
     try {
       this.scanTextNodes(rootNode);
-      this.scanAnchorTags(rootNode);
     } finally {
       this.isScanning = false;
     }
@@ -263,34 +248,6 @@ export class IndicatorScanner {
 
       currentNode = remainingNode;
       regex.lastIndex = 0;
-    }
-  }
-
-  scanAnchorTags(container) {
-    if (!container) return;
-    const anchors = typeof container.querySelectorAll === 'function' ? container.querySelectorAll('a') : [];
-    for (const a of anchors) {
-      if (a.classList && a.classList.contains('collection-identifier-mark')) continue;
-      // If anchor already contains a checkmark badge or has one directly after, skip
-      if (typeof a.querySelector === 'function' && a.querySelector('.collection-identifier-mark')) continue;
-      if (a.nextSibling && a.nextSibling.classList && a.nextSibling.classList.contains('collection-identifier-mark')) continue;
-
-      const href = a.getAttribute('href') || a.href || '';
-      if (!href) continue;
-
-      for (const item of this.items) {
-        const cleanIdent = item.identifier.trim();
-        const pattern = new RegExp(buildTokenPattern(cleanIdent), 'i');
-        if (pattern.test(href)) {
-          const badge = this.createBadgeElement(item);
-          if (typeof a.insertAdjacentElement === 'function') {
-            a.insertAdjacentElement('afterend', badge);
-          } else if (a.parentNode) {
-            a.parentNode.insertBefore(badge, a.nextSibling);
-          }
-          break;
-        }
-      }
     }
   }
 

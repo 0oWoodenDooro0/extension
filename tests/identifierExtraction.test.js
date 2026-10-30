@@ -9,7 +9,7 @@ import {
 describe('Identifier URL Regex Extraction Engine', () => {
   describe('extractIdentifierFromUrl', () => {
     it('returns null when url is empty, null, or not a string', () => {
-      const rules = [{ extractionRegex: 'item/(\\d+)' }];
+      const rules = [{ urlPattern: 'example.com', extractionRegex: 'item/(\\d+)' }];
       assert.strictEqual(extractIdentifierFromUrl('', rules), null);
       assert.strictEqual(extractIdentifierFromUrl(null, rules), null);
       assert.strictEqual(extractIdentifierFromUrl(undefined, rules), null);
@@ -28,6 +28,7 @@ describe('Identifier URL Regex Extraction Engine', () => {
         {
           id: 'rule-gh',
           name: 'GitHub Issues',
+          urlPattern: 'github.com',
           extractionRegex: 'github\\.com/[^/]+/[^/]+/issues/(\\d+)'
         }
       ];
@@ -41,6 +42,7 @@ describe('Identifier URL Regex Extraction Engine', () => {
         {
           id: 'rule-yt',
           name: 'YouTube Video ID',
+          urlPattern: 'youtube.com',
           extractionRegex: '[?&]v=([a-zA-Z0-9_-]+)'
         }
       ];
@@ -54,6 +56,7 @@ describe('Identifier URL Regex Extraction Engine', () => {
         {
           id: 'rule-multi-group',
           name: 'Multi Group Rule',
+          urlPattern: 'shop.example.com',
           extractionRegex: 'item/(sku|id)-([A-Z0-9]+)',
           captureGroup: 2
         }
@@ -68,6 +71,7 @@ describe('Identifier URL Regex Extraction Engine', () => {
         {
           id: 'rule-encoded',
           name: 'Encoded Path Segment',
+          urlPattern: 'example.com',
           extractionRegex: '/item/([^/?#]+)'
         }
       ];
@@ -122,18 +126,21 @@ describe('Identifier URL Regex Extraction Engine', () => {
           id: 'rule-1',
           name: 'Disabled Rule',
           enabled: false,
+          urlPattern: 'github.com',
           extractionRegex: 'issues/(\\d+)'
         },
         {
           id: 'rule-2',
           name: 'High Priority Rule',
           enabled: true,
+          urlPattern: 'github.com',
           extractionRegex: 'issues/(\\d+)'
         },
         {
           id: 'rule-3',
           name: 'Low Priority Rule',
           enabled: true,
+          urlPattern: 'github.com',
           extractionRegex: '(\\d+)'
         }
       ];
@@ -147,11 +154,13 @@ describe('Identifier URL Regex Extraction Engine', () => {
         {
           id: 'rule-invalid',
           name: 'Malformed Regex',
+          urlPattern: 'example.com',
           extractionRegex: '([a-z+' // Missing closing parenthesis
         },
         {
           id: 'rule-valid',
           name: 'Valid Fallback Rule',
+          urlPattern: 'example.com',
           extractionRegex: 'item-(\\d+)'
         }
       ];
@@ -164,10 +173,24 @@ describe('Identifier URL Regex Extraction Engine', () => {
       const rules = [
         {
           id: 'rule-gh',
+          urlPattern: 'github.com',
           extractionRegex: 'github\\.com/[^/]+/[^/]+/issues/(\\d+)'
         }
       ];
       const url = 'https://example.com/about';
+      assert.strictEqual(extractIdentifierFromUrl(url, rules), null);
+    });
+
+    it('ignores rules using deprecated rule.regex property without extractionRegex', () => {
+      const rules = [
+        {
+          id: 'rule-legacy',
+          name: 'Legacy Sniffed Rule',
+          urlPattern: 'example.com',
+          regex: 'item/(\\d+)'
+        }
+      ];
+      const url = 'https://example.com/item/42';
       assert.strictEqual(extractIdentifierFromUrl(url, rules), null);
     });
   });
@@ -203,6 +226,7 @@ describe('Identifier URL Regex Extraction Engine', () => {
       await store.saveRule({
         id: rule.id,
         name: 'GitHub Issues & Pulls',
+        urlPattern: 'github.com',
         extractionRegex: '(?:issues|pull)/(\\d+)'
       });
       assert.strictEqual(store.getRules().length, 1);
@@ -223,17 +247,31 @@ describe('Identifier URL Regex Extraction Engine', () => {
         },
         /required/i
       );
+      await assert.rejects(
+        async () => {
+          await store.saveRule({ name: 'Missing Pattern', extractionRegex: 'issues/(\\d+)' });
+        },
+        /required/i
+      );
+      await assert.rejects(
+        async () => {
+          await store.saveRule({ name: 'Missing Regex', urlPattern: 'github.com' });
+        },
+        /required/i
+      );
     });
 
     it('reorders rules and extracts identifier using prioritized rules', async () => {
       await store.saveRule({
         id: 'rule-broad',
         name: 'Broad Rule',
+        urlPattern: 'example.com',
         extractionRegex: '(\\d+)'
       });
       await store.saveRule({
         id: 'rule-specific',
         name: 'Specific Rule',
+        urlPattern: 'example.com',
         extractionRegex: 'ticket-([a-z0-9]+)'
       });
 
@@ -268,6 +306,7 @@ describe('Identifier URL Regex Extraction Engine', () => {
           {
             id: 'rule-ext',
             name: 'External Rule',
+            urlPattern: 'example.com',
             extractionRegex: 'ext/(\\d+)'
           }
         ]

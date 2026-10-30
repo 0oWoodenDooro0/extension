@@ -74,12 +74,24 @@ function createMockDocument() {
       },
       set innerText(val) {
         _text = String(val);
+        childNodes.length = 0;
+        children.length = 0;
       },
       get textContent() {
         return _text || childNodes.map(n => n.textContent || n.innerText || '').join('');
       },
       set textContent(val) {
         _text = String(val);
+        childNodes.length = 0;
+        children.length = 0;
+      },
+      get innerHTML() {
+        return childNodes.map(n => n.textContent || '').join('');
+      },
+      set innerHTML(val) {
+        _text = '';
+        childNodes.length = 0;
+        children.length = 0;
       },
       get children() {
         return children;
@@ -746,6 +758,34 @@ describe('Collection Item Card Tag Click-to-Filter & Event Isolation (Ticket #15
       assert.match(formElements.identifierWarning.textContent, /Conflicting Book/);
     });
 
+    it('renders a clickable inspect link for conflicting duplicate item and clicking it inspects/edits conflicting item', async () => {
+      await collectionStore.saveItem({
+        title: 'Original Existing Book',
+        url: 'https://example.com/existing-book',
+        identifier: 'BOOK-DUPE'
+      });
+
+      initAddItemView({});
+      showAddItemView(null);
+
+      formElements.itemTitleInput.value = 'New Item Attempt';
+      formElements.itemIdentifierInput.value = 'BOOK-DUPE';
+      formElements.itemIdentifierInput.dispatchEvent({ type: 'input' });
+
+      assert.strictEqual(formElements.identifierWarning.style.display, 'block');
+      const inspectLink = formElements.identifierWarning.querySelector('#inspectDuplicateLink');
+      assert.ok(inspectLink, 'Should render #inspectDuplicateLink');
+      assert.match(inspectLink.textContent, /Original Existing Book/);
+
+      // Clicking inspect link loads conflicting item into view
+      inspectLink.click();
+
+      assert.strictEqual(formElements.itemTitleInput.value, 'Original Existing Book');
+      assert.strictEqual(formElements.itemUrlInput.value, 'https://example.com/existing-book');
+      assert.strictEqual(formElements.itemIdentifierInput.value, 'BOOK-DUPE');
+      assert.strictEqual(formElements.identifierWarning.style.display, 'none');
+    });
+
     it('clears warning when input becomes unique or empty', async () => {
       await collectionStore.saveItem({
         title: 'Existing Book',
@@ -861,6 +901,7 @@ describe('Collection Item Card Tag Click-to-Filter & Event Isolation (Ticket #15
       });
       await identifierRuleStore.saveRule({
         name: 'Conflict Rule',
+        urlPattern: 'example.com',
         extractionRegex: 'token-([A-Z0-9-]+)'
       });
 
@@ -878,6 +919,7 @@ describe('Collection Item Card Tag Click-to-Filter & Event Isolation (Ticket #15
     it('does not overwrite manually edited identifier when changing URL', async () => {
       await identifierRuleStore.saveRule({
         name: 'GitHub Issues',
+        urlPattern: 'github.com',
         extractionRegex: 'issues/(\\d+)'
       });
 
