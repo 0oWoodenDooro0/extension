@@ -262,6 +262,68 @@ function getFilteredItems() {
   });
 }
 
+/**
+ * 渲染單個項目卡片元素
+ * @param {Object} item 項目資料物件
+ * @param {Document} [doc] DOM Document 物件（預設為全域 document）
+ * @returns {HTMLElement} 項目卡片 DOM 節點
+ */
+export function renderItemElement(item, doc = globalThis.document) {
+  const listItem = doc.createElement('li');
+  listItem.className = "listItem";
+  listItem.id = `item-${item.id}`;
+
+  listItem.dataset.id = item.id;
+  listItem.dataset.url = item.url;
+
+  const textContainer = doc.createElement('div');
+  const itemTitleSpan = doc.createElement('span');
+  itemTitleSpan.className = 'item-title';
+  itemTitleSpan.innerText = item.title;
+  textContainer.appendChild(itemTitleSpan);
+
+  const actors = item.actors || [];
+  if (actors.length > 0) {
+    const itemActorSpan = doc.createElement('span');
+    itemActorSpan.className = 'item-actor';
+    itemActorSpan.innerText = `${actors.join(', ')}`;
+    textContainer.appendChild(itemActorSpan);
+  }
+
+  const rawTags = Array.isArray(item.tags)
+    ? item.tags.filter(t => typeof t === 'string' && t.trim().length > 0)
+    : [];
+  if (rawTags.length > 0) {
+    const itemTagsContainer = doc.createElement('div');
+    itemTagsContainer.className = 'item-tags';
+    const displayTags = rawTags.slice(0, 3);
+    displayTags.forEach((tag, idx) => {
+      if (idx > 0) {
+        itemTagsContainer.appendChild(doc.createTextNode(' '));
+      }
+      const tagSpan = doc.createElement('span');
+      tagSpan.className = 'item-tag';
+      const cleanTag = tag.trim();
+      tagSpan.innerText = cleanTag.startsWith('#') ? cleanTag : `#${cleanTag}`;
+      itemTagsContainer.appendChild(tagSpan);
+    });
+    textContainer.appendChild(itemTagsContainer);
+  }
+
+  listItem.appendChild(textContainer);
+
+  if (item.imageUrl) {
+    const itemImage = doc.createElement('img');
+    itemImage.className = 'item-image';
+    itemImage.src = item.imageUrl;
+    itemImage.loading = "lazy";
+    itemImage.onerror = (e) => { e.target.style.display = 'none'; };
+    listItem.appendChild(itemImage);
+  }
+
+  return listItem;
+}
+
 function renderFilteredList() {
   if (!itemList) return;
   const itemsToDisplay = getFilteredItems();
@@ -270,38 +332,7 @@ function renderFilteredList() {
   const fragment = document.createDocumentFragment();
 
   itemsToDisplay.forEach(item => {
-    const listItem = document.createElement('li');
-    listItem.className = "listItem";
-    listItem.id = `item-${item.id}`;
-
-    listItem.dataset.id = item.id;
-    listItem.dataset.url = item.url;
-
-    const textContainer = document.createElement('div');
-    const itemTitleSpan = document.createElement('span');
-    itemTitleSpan.className = 'item-title';
-    itemTitleSpan.innerText = item.title;
-    textContainer.appendChild(itemTitleSpan);
-
-    const actors = item.actors || [];
-    if (actors.length > 0) {
-      const itemActorSpan = document.createElement('span');
-      itemActorSpan.className = 'item-actor';
-      itemActorSpan.innerText = `${actors.join(', ')}`;
-      textContainer.appendChild(itemActorSpan);
-    }
-
-    listItem.appendChild(textContainer);
-
-    if (item.imageUrl) {
-      const itemImage = document.createElement('img');
-      itemImage.className = 'item-image';
-      itemImage.src = item.imageUrl;
-      itemImage.loading = "lazy";
-      itemImage.onerror = (e) => { e.target.style.display = 'none'; };
-      listItem.appendChild(itemImage);
-    }
-
+    const listItem = renderItemElement(item, document);
     fragment.appendChild(listItem);
   });
 
