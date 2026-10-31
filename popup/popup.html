@@ -322,19 +322,19 @@
                     <input type="hidden" id="engineId">
                     <div class="form-group">
                         <label for="engineTitle">Shortcut Title</label>
-                        <input type="text" id="engineTitle" placeholder="e.g. Google" required>
+                        <input type="text" id="engineTitle" placeholder="Shortcut title" required>
                     </div>
                     <div class="form-group">
                         <label for="engineUrl">URL Template (use {id} or {query} placeholder)</label>
-                        <input type="url" id="engineUrl" placeholder="e.g. https://www.google.com/search?q={query}" required>
+                        <input type="url" id="engineUrl" placeholder="URL template with {query}" required>
                     </div>
                     <div class="form-group">
                         <label for="engineRegex">Custom Query Regex (Optional)</label>
-                        <input type="text" id="engineRegex" placeholder="e.g. (*)">
+                        <input type="text" id="engineRegex" placeholder="Regular expression pattern">
                     </div>
                     <div class="form-group">
                         <label for="engineReplacement">Regex Replacement (Optional)</label>
-                        <input type="text" id="engineReplacement" placeholder="e.g. $1">
+                        <input type="text" id="engineReplacement" placeholder="Replacement pattern">
                     </div>
                 </div>
             </div>
@@ -371,19 +371,19 @@
                     <input type="hidden" id="ruleId">
                     <div class="form-group">
                         <label for="ruleName">Rule Name</label>
-                        <input type="text" id="ruleName" placeholder="e.g. GitHub Issues" required>
+                        <input type="text" id="ruleName" placeholder="Rule name" required>
                     </div>
                     <div class="form-group">
                         <label for="rulePattern">Source URL Pattern (Supports * wildcard or domain)</label>
-                        <input type="text" id="rulePattern" placeholder="e.g. github.com or *example.com/item/*" required>
+                        <input type="text" id="rulePattern" placeholder="Domain or URL pattern with wildcards" required>
                     </div>
                     <div class="form-group">
                         <label for="ruleRegex">Extraction Regex</label>
-                        <input type="text" id="ruleRegex" placeholder="e.g. issues/(\d+) or products/([a-z]+)/([0-9]+)" required>
+                        <input type="text" id="ruleRegex" placeholder="Regular expression with capture groups" required>
                     </div>
                     <div class="form-group">
-                        <label for="ruleReplacement">Replacement Template (Optional, e.g. $1-$2 or ID-$1)</label>
-                        <input type="text" id="ruleReplacement" placeholder="e.g. $1-$2 (defaults to first capture group)">
+                        <label for="ruleReplacement">Replacement Template (Optional)</label>
+                        <input type="text" id="ruleReplacement" placeholder="Replacement template or leave blank for first capture group">
                     </div>
                     <div class="form-group">
                         <label for="ruleTestUrl">Test URL (Instant Preview)</label>

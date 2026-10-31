@@ -335,11 +335,17 @@ export function inPageToast(message, isExisting, isDuplicate = false) {
     toast.style.transform = 'translateY(0) scale(1)';
   });
 
-  setTimeout(() => {
+  const timer = setTimeout(() => {
     toast.style.opacity = '0';
     toast.style.transform = 'translateY(-10px) scale(0.96)';
-    setTimeout(() => toast.remove(), 260);
+    const subTimer = setTimeout(() => toast.remove(), 260);
+    if (subTimer && typeof subTimer.unref === 'function') {
+      subTimer.unref();
+    }
   }, 2000);
+  if (timer && typeof timer.unref === 'function') {
+    timer.unref();
+  }
 }
 
 /**
@@ -364,11 +370,14 @@ export async function showSaveFeedback(
         color: badgeColor,
         tabId: tab.id
       });
-      setTimeout(() => {
+      const badgeTimer = setTimeout(() => {
         try {
           chrome.action.setBadgeText({ text: '', tabId: tab.id });
         } catch {}
       }, 2000);
+      if (badgeTimer && typeof badgeTimer.unref === 'function') {
+        badgeTimer.unref();
+      }
     } catch {}
   }
 
