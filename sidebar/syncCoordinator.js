@@ -23,6 +23,7 @@ function isItemContentEqual(a, b) {
   if (a.title !== b.title) return false;
   if (a.url !== b.url) return false;
   if ((a.imageUrl || null) !== (b.imageUrl || null)) return false;
+  if ((a.identifier || null) !== (b.identifier || null)) return false;
   if (!arraysEqual(a.tags, b.tags)) return false;
   if (!arraysEqual(a.actors, b.actors)) return false;
   return true;
@@ -53,6 +54,25 @@ function isEngineModified(eng, baseEng) {
   const baseTime = Number(baseEng.updatedAt || 0);
   if (engTime > baseTime) return true;
   return !isEngineContentEqual(eng, baseEng);
+}
+
+function isRuleContentEqual(a, b) {
+  if (!a || !b) return a === b;
+  if (a.name !== b.name) return false;
+  if ((a.urlPattern || null) !== (b.urlPattern || null)) return false;
+  if ((a.extractionRegex || null) !== (b.extractionRegex || null)) return false;
+  if ((a.captureGroup || 1) !== (b.captureGroup || 1)) return false;
+  if ((a.enabled !== false) !== (b.enabled !== false)) return false;
+  return true;
+}
+
+function isRuleModified(rule, baseRule) {
+  if (!rule && !baseRule) return false;
+  if (!rule || !baseRule) return true;
+  const ruleTime = Number(rule.updatedAt || 0);
+  const baseTime = Number(baseRule.updatedAt || 0);
+  if (ruleTime > baseTime) return true;
+  return !isRuleContentEqual(rule, baseRule);
 }
 
 /**
@@ -97,6 +117,24 @@ export function isUnifiedDataEqual(dataA, dataB) {
     const key = engA && (engA.id || engA.urlTemplate);
     const engB = mapBEngines.get(key);
     if (!engB || isEngineModified(engA, engB) || !isEngineContentEqual(engA, engB)) {
+      return false;
+    }
+  }
+
+  const rulesA = Array.isArray(dataA.identifierRules) ? dataA.identifierRules : [];
+  const rulesB = Array.isArray(dataB.identifierRules) ? dataB.identifierRules : [];
+  if (rulesA.length !== rulesB.length) return false;
+
+  const mapBRules = new Map();
+  for (const rule of rulesB) {
+    if (rule && rule.id) {
+      mapBRules.set(rule.id, rule);
+    }
+  }
+  for (const ruleA of rulesA) {
+    const key = ruleA && ruleA.id;
+    const ruleB = mapBRules.get(key);
+    if (!ruleB || isRuleModified(ruleA, ruleB) || !isRuleContentEqual(ruleA, ruleB)) {
       return false;
     }
   }
@@ -170,11 +208,36 @@ export function twoWayMergeUnifiedData(localData, cloudData) {
     }
   }
 
+  const localRules = Array.isArray(localData?.identifierRules) ? localData.identifierRules : [];
+  const cloudRules = Array.isArray(cloudData?.identifierRules) ? cloudData.identifierRules : [];
+  const ruleMap = new Map();
+
+  for (const rule of cloudRules) {
+    if (rule && rule.id) {
+      ruleMap.set(rule.id, { ...rule });
+    }
+  }
+
+  for (const rule of localRules) {
+    if (!rule || !rule.id) continue;
+    if (!ruleMap.has(rule.id)) {
+      ruleMap.set(rule.id, { ...rule });
+    } else {
+      const cloudRule = ruleMap.get(rule.id);
+      const localTime = Number(rule.updatedAt || 0);
+      const cloudTime = Number(cloudRule.updatedAt || 0);
+      if (localTime >= cloudTime) {
+        ruleMap.set(rule.id, { ...cloudRule, ...rule });
+      }
+    }
+  }
+
   return {
     version: 1,
     items: Array.from(itemMap.values()),
     tags: Array.from(tagSet),
-    searchEngines: Array.from(engineMap.values())
+    searchEngines: Array.from(engineMap.values()),
+    identifierRules: Array.from(ruleMap.values())
   };
 }
 
@@ -429,11 +492,93 @@ export function threeWayMergeUnifiedData(localData, cloudData, baseData) {
     }
   }
 
+  // --- 4. Identifier Rules 3-Way Merge ---
+  const localRules = Array.isArray(localData?.identifierRules) ? localData.identifierRules : [];
+  const cloudRules = Array.isArray(cloudData?.identifierRules) ? cloudData.identifierRules : [];
+  const baseRules = Array.isArray(baseData?.identifierRules) ? baseData.identifierRules : [];
+
+  const localRuleMap = new Map();
+  for (const r of localRules) {
+    if (r && r.id) localRuleMap.set(r.id, r);
+  }
+  const cloudRuleMap = new Map();
+  for (const r of cloudRules) {
+    if (r && r.id) cloudRuleMap.set(r.id, r);
+  }
+  const baseRuleMap = new Map();
+  for (const r of baseRules) {
+    if (r && r.id) baseRuleMap.set(r.id, r);
+  }
+
+  const allRuleKeys = new Set([
+    ...localRuleMap.keys(),
+    ...cloudRuleMap.keys(),
+    ...baseRuleMap.keys()
+  ]);
+
+  const mergedRules = [];
+
+  for (const key of allRuleKeys) {
+    const localRule = localRuleMap.get(key);
+    const cloudRule = cloudRuleMap.get(key);
+    const baseRule = baseRuleMap.get(key);
+
+    const inLocal = !!localRule;
+    const inCloud = !!cloudRule;
+    const inBase = !!baseRule;
+
+    if (inLocal && inCloud && inBase) {
+      const localMod = isRuleModified(localRule, baseRule);
+      const cloudMod = isRuleModified(cloudRule, baseRule);
+
+      if (!localMod && !cloudMod) {
+        mergedRules.push({ ...localRule });
+      } else if (localMod && !cloudMod) {
+        mergedRules.push({ ...localRule });
+      } else if (!localMod && cloudMod) {
+        mergedRules.push({ ...cloudRule });
+      } else {
+        const localTime = Number(localRule.updatedAt || 0);
+        const cloudTime = Number(cloudRule.updatedAt || 0);
+        if (localTime >= cloudTime) {
+          mergedRules.push({ ...cloudRule, ...localRule });
+        } else {
+          mergedRules.push({ ...localRule, ...cloudRule });
+        }
+      }
+    } else if (!inLocal && inCloud && inBase) {
+      const cloudMod = isRuleModified(cloudRule, baseRule);
+      if (cloudMod) {
+        mergedRules.push({ ...cloudRule });
+      }
+    } else if (inLocal && !inCloud && inBase) {
+      const localMod = isRuleModified(localRule, baseRule);
+      if (localMod) {
+        mergedRules.push({ ...localRule });
+      }
+    } else if (!inLocal && !inCloud && inBase) {
+      // Both deleted
+    } else if (inLocal && !inCloud && !inBase) {
+      mergedRules.push({ ...localRule });
+    } else if (!inLocal && inCloud && !inBase) {
+      mergedRules.push({ ...cloudRule });
+    } else if (inLocal && inCloud && !inBase) {
+      const localTime = Number(localRule.updatedAt || 0);
+      const cloudTime = Number(cloudRule.updatedAt || 0);
+      if (localTime >= cloudTime) {
+        mergedRules.push({ ...cloudRule, ...localRule });
+      } else {
+        mergedRules.push({ ...localRule, ...cloudRule });
+      }
+    }
+  }
+
   return {
     version: 1,
     items: mergedItems,
     tags: mergedTags,
-    searchEngines: mergedEngines
+    searchEngines: mergedEngines,
+    identifierRules: mergedRules
   };
 }
 
@@ -461,6 +606,7 @@ export class SyncCoordinator {
    * @param {Object} options.cloudAdapter - 雲端適配器 (實作 findFile, downloadJson, uploadJson, isAuthenticated)
    * @param {Object} options.collectionStore - CollectionStore 實例
    * @param {Object} options.searchEngineStore - SearchEngineStore 實例
+   * @param {Object} [options.identifierRuleStore] - IdentifierRuleStore 實例
    * @param {Object} [options.storage] - 本地儲存 (記錄 last_sync_time, last_sync_base, sync_dirty 等)
    * @param {number} [options.autoSyncDebounceMs=3000] - 自動防抖同步延遲毫秒數
    */
@@ -468,12 +614,14 @@ export class SyncCoordinator {
     cloudAdapter,
     collectionStore,
     searchEngineStore,
+    identifierRuleStore = null,
     storage = null,
     autoSyncDebounceMs = 3000
   } = {}) {
     this.cloudAdapter = cloudAdapter;
     this.collectionStore = collectionStore;
     this.searchEngineStore = searchEngineStore;
+    this.identifierRuleStore = identifierRuleStore;
     this.storage = storage;
     this.autoSyncDebounceMs = autoSyncDebounceMs;
     this.status = SYNC_STATUS.IDLE;
@@ -566,6 +714,9 @@ export class SyncCoordinator {
     if (this.searchEngineStore && typeof this.searchEngineStore.subscribe === 'function') {
       this._unsubscribeStores.push(this.searchEngineStore.subscribe(handleStoreMutation));
     }
+    if (this.identifierRuleStore && typeof this.identifierRuleStore.subscribe === 'function') {
+      this._unsubscribeStores.push(this.identifierRuleStore.subscribe(handleStoreMutation));
+    }
 
     return () => this.disableAutoSync();
   }
@@ -596,12 +747,17 @@ export class SyncCoordinator {
    */
   async hasUnsyncedChanges() {
     if (this.isDirty) return true;
-    const localData = await createUnifiedBackup(this.collectionStore, this.searchEngineStore);
+    const localData = await createUnifiedBackup(
+      this.collectionStore,
+      this.searchEngineStore,
+      this.identifierRuleStore
+    );
     if (!this.baseData) {
       return (
         localData.items.length > 0 ||
         localData.tags.length > 0 ||
-        localData.searchEngines.length > 0
+        localData.searchEngines.length > 0 ||
+        (localData.identifierRules && localData.identifierRules.length > 0)
       );
     }
     return !isUnifiedDataEqual(localData, this.baseData);
@@ -780,7 +936,11 @@ export class SyncCoordinator {
 
       if (!cloudFile) {
         // 雲端無檔案：取得本地最新資料並推送至雲端
-        const localData = await createUnifiedBackup(this.collectionStore, this.searchEngineStore);
+        const localData = await createUnifiedBackup(
+          this.collectionStore,
+          this.searchEngineStore,
+          this.identifierRuleStore
+        );
         this._setStatus(SYNC_STATUS.SYNCING, 'Uploading initial data to cloud...');
         const uploadResult = await this.cloudAdapter.uploadJson(localData);
 
@@ -795,6 +955,7 @@ export class SyncCoordinator {
             itemsCount: localData.items.length,
             tagsCount: localData.tags.length,
             searchEnginesCount: localData.searchEngines.length,
+            identifierRulesCount: localData.identifierRules ? localData.identifierRules.length : 0,
             modifiedTime: uploadResult.modifiedTime
           }
         };
@@ -810,7 +971,11 @@ export class SyncCoordinator {
       }
 
       // 3. 在網路請求完成後，立即讀取當前「最新、最即時」的本地快照（避免網路請求期間使用者新增的資料被覆寫）
-      const localData = await createUnifiedBackup(this.collectionStore, this.searchEngineStore);
+      const localData = await createUnifiedBackup(
+        this.collectionStore,
+        this.searchEngineStore,
+        this.identifierRuleStore
+      );
 
       // 4. 智慧三向合併 (Smart 3-Way Merge)
       const mergedData = mergeUnifiedData(localData, cloudData, this.baseData);
@@ -823,7 +988,8 @@ export class SyncCoordinator {
       try {
         await restoreUnifiedBackup(mergedData, {
           collectionStore: this.collectionStore,
-          searchEngineStore: this.searchEngineStore
+          searchEngineStore: this.searchEngineStore,
+          identifierRuleStore: this.identifierRuleStore
         });
       } finally {
         this.isApplyingRemoteSync = false;
@@ -879,7 +1045,8 @@ export class SyncCoordinator {
     try {
       result = await restoreUnifiedBackup(cloudData, {
         collectionStore: this.collectionStore,
-        searchEngineStore: this.searchEngineStore
+        searchEngineStore: this.searchEngineStore,
+        identifierRuleStore: this.identifierRuleStore
       });
     } finally {
       this.isApplyingRemoteSync = false;
@@ -908,7 +1075,11 @@ export class SyncCoordinator {
     if (!isAuth) throw new Error('Not authenticated.');
 
     this._setStatus(SYNC_STATUS.SYNCING, 'Uploading local data to cloud...');
-    const localData = await createUnifiedBackup(this.collectionStore, this.searchEngineStore);
+    const localData = await createUnifiedBackup(
+      this.collectionStore,
+      this.searchEngineStore,
+      this.identifierRuleStore
+    );
     const uploadResult = await this.cloudAdapter.uploadJson(localData);
 
     const now = Date.now();

@@ -16,7 +16,8 @@ export class MemoryStorageAdapter {
   constructor(initialData = {}) {
     this.data = {
       items: initialData.items ? JSON.parse(JSON.stringify(initialData.items)) : [],
-      tags: initialData.tags ? JSON.parse(JSON.stringify(initialData.tags)) : []
+      tags: initialData.tags ? JSON.parse(JSON.stringify(initialData.tags)) : [],
+      ...JSON.parse(JSON.stringify(initialData))
     };
     this.listeners = [];
   }
@@ -201,6 +202,35 @@ export class CollectionStore {
     return this.items.find(i => i.url === url);
   }
 
+  /**
+   * 依據 identifier 查找 Collection Item (不分大小寫、自動去除前後空白，可排除指定 itemId)
+   * @param {string} identifier - 查找的識別碼
+   * @param {string|null} excludeId - 欲排除的比對項目 ID (例如編輯模式時自身 ID)
+   * @returns {Object|null} 匹配的 Collection Item 或 null
+   */
+  findItemByIdentifier(identifier, excludeId = null) {
+    if (!identifier || typeof identifier !== 'string') return null;
+    const clean = identifier.trim().toLowerCase();
+    if (!clean) return null;
+
+    const exclude = excludeId ? String(excludeId).trim() : null;
+    return this.items.find(item => {
+      if (exclude && item.id === exclude) return false;
+      if (!item.identifier || typeof item.identifier !== 'string') return false;
+      return item.identifier.trim().toLowerCase() === clean;
+    }) || null;
+  }
+
+  /**
+   * 檢查是否存在重複的 identifier (不分大小寫、自動去除前後空白，可排除指定 itemId)
+   * @param {string} identifier
+   * @param {string|null} excludeId
+   * @returns {boolean}
+   */
+  hasDuplicateIdentifier(identifier, excludeId = null) {
+    return this.findItemByIdentifier(identifier, excludeId) !== null;
+  }
+
   getAllActors() {
     const actorSet = new Set();
     this.items.forEach(item => {
@@ -266,7 +296,7 @@ export class CollectionStore {
       });
     }
 
-    // 3. 全文搜尋 (Search across title, url, actors)
+    // 3. 全文搜尋 (Search across title, url, actors, identifier)
     const cleanSearch = (search || '').trim().toLowerCase();
     if (cleanSearch) {
       results = results.filter(item => {
@@ -274,11 +304,20 @@ export class CollectionStore {
         const urlMatch = item.url && item.url.toLowerCase().includes(cleanSearch);
         const actors = Array.isArray(item.actors) ? item.actors : [];
         const actorMatch = actors.some(a => (a || '').toLowerCase().includes(cleanSearch));
-        return titleMatch || urlMatch || actorMatch;
+        const identifierMatch = item.identifier && item.identifier.toLowerCase().includes(cleanSearch);
+        return titleMatch || urlMatch || actorMatch || identifierMatch;
       });
     }
 
-    // 4. 排序 (Sorting)
+    // 4. Identifier 精確比對過濾
+    if (options.identifier) {
+      const cleanIdent = String(options.identifier).trim().toLowerCase();
+      results = results.filter(item =>
+        item.identifier && typeof item.identifier === 'string' && item.identifier.trim().toLowerCase() === cleanIdent
+      );
+    }
+
+    // 5. 排序 (Sorting)
     results.sort((a, b) => {
       let valA = a[sortBy];
       let valB = b[sortBy];
@@ -313,7 +352,7 @@ export class CollectionStore {
   /**
    * 新增或更新項目 (自動處理 ID 生成、addDate/updatedAt 時間戳、去重與持久化)
    */
-  async saveItem({ id, title, url, tags = [], imageUrl = null, actors = [] }) {
+  async saveItem({ id, title, url, tags = [], imageUrl = null, actors = [], identifier = undefined }) {
     if (!title || !url) {
       throw new Error('Item title and url are required.');
     }
@@ -323,6 +362,9 @@ export class CollectionStore {
     const cleanTags = Array.isArray(tags) ? [...tags] : [];
     const cleanActors = Array.isArray(actors) ? actors.map(a => a.trim()).filter(Boolean) : [];
     const cleanImageUrl = imageUrl ? imageUrl.trim() : null;
+    const cleanIdentifier = (identifier !== undefined && identifier !== null)
+      ? (String(identifier).trim() || null)
+      : undefined;
     const now = Date.now();
 
     let targetItem = id
@@ -336,6 +378,9 @@ export class CollectionStore {
       targetItem.tags = cleanTags;
       targetItem.imageUrl = cleanImageUrl;
       targetItem.actors = cleanActors;
+      if (cleanIdentifier !== undefined) {
+        targetItem.identifier = cleanIdentifier;
+      }
       targetItem.updatedAt = now;
     } else {
       // 建立全新項目
@@ -347,7 +392,8 @@ export class CollectionStore {
         addDate: now,
         updatedAt: now,
         imageUrl: cleanImageUrl,
-        actors: cleanActors
+        actors: cleanActors,
+        identifier: cleanIdentifier !== undefined ? cleanIdentifier : null
       };
       this.items.push(targetItem);
     }

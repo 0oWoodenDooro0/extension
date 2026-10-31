@@ -1,9 +1,10 @@
 // addItemView.js - 負責新增與編輯項目的表單邏輯
 import { collectionStore } from './store.js';
+import { identifierRuleStore } from '../identifierRuleStore.js';
 import { tabAdapter } from '../tabAdapter.js';
 
 // --- DOM Elements ---
-let itemTitleInput, itemUrlInput, itemImageUrlInput;
+let itemTitleInput, itemUrlInput, itemIdentifierInput, identifierWarning, itemImageUrlInput;
 let fetchImageButton, imagePreviewContainer, imagePreview, imagePreviewStatus;
 let itemActorInput, addActorButton, selectedActorsContainer, actorSuggestions;
 let existingTagsContainer, saveItemButton, cancelButton, deleteItemButton;
@@ -24,6 +25,8 @@ export function initAddItemView(injectedCallbacks) {
   // 獲取 DOM 元素
   itemTitleInput = document.getElementById('itemTitleInput');
   itemUrlInput = document.getElementById('itemUrlInput');
+  itemIdentifierInput = document.getElementById('itemIdentifierInput');
+  identifierWarning = document.getElementById('identifierWarning');
   itemImageUrlInput = document.getElementById('itemImageUrlInput');
   fetchImageButton = document.getElementById('fetchImageButton');
   imagePreviewContainer = document.getElementById('imagePreviewContainer');
@@ -40,6 +43,13 @@ export function initAddItemView(injectedCallbacks) {
   deleteItemButton = document.getElementById('deleteItemButton');
 
   // 綁定事件
+  if (itemIdentifierInput) {
+    itemIdentifierInput.addEventListener('input', () => {
+      itemIdentifierInput.dataset.autoFilled = 'false';
+      checkDuplicateIdentifier();
+    });
+  }
+
   if (fetchImageButton) {
     fetchImageButton.addEventListener('click', () => {
       const url = itemUrlInput ? itemUrlInput.value.trim() : '';
@@ -58,9 +68,22 @@ export function initAddItemView(injectedCallbacks) {
 
   if (itemUrlInput) {
     itemUrlInput.addEventListener('input', () => {
+      const url = itemUrlInput.value.trim();
+      if (
+        url &&
+        itemIdentifierInput &&
+        (!itemIdentifierInput.value || itemIdentifierInput.dataset.autoFilled === 'true')
+      ) {
+        const extracted = identifierRuleStore.extractIdentifier(url);
+        if (extracted) {
+          itemIdentifierInput.value = extracted;
+          itemIdentifierInput.dataset.autoFilled = 'true';
+          checkDuplicateIdentifier();
+        }
+      }
+
       if (urlDebounceTimer) clearTimeout(urlDebounceTimer);
       urlDebounceTimer = setTimeout(() => {
-        const url = itemUrlInput.value.trim();
         // 只有在尚未填寫圖片或圖片為空時自動觸發抓取
         if (url && itemImageUrlInput && !itemImageUrlInput.value) {
           tryFetchImage(url, false);
@@ -99,6 +122,14 @@ export function showAddItemView(itemId = null) {
   // 重置表單
   if (itemTitleInput) itemTitleInput.value = '';
   if (itemUrlInput) itemUrlInput.value = '';
+  if (itemIdentifierInput) {
+    itemIdentifierInput.value = '';
+    delete itemIdentifierInput.dataset.autoFilled;
+  }
+  if (identifierWarning) {
+    identifierWarning.style.display = 'none';
+    identifierWarning.textContent = '';
+  }
   if (itemImageUrlInput) itemImageUrlInput.value = '';
   if (itemActorInput) itemActorInput.value = '';
   currentEditingActors = [];
@@ -114,11 +145,13 @@ export function showAddItemView(itemId = null) {
     editingItemId = itemId;
     if (itemTitleInput) itemTitleInput.value = itemToEdit.title;
     if (itemUrlInput) itemUrlInput.value = itemToEdit.url;
+    if (itemIdentifierInput) itemIdentifierInput.value = itemToEdit.identifier || '';
     if (itemImageUrlInput) itemImageUrlInput.value = itemToEdit.imageUrl || '';
     currentEditingActors = itemToEdit.actors ? [...itemToEdit.actors] : [];
 
     if (deleteItemButton) deleteItemButton.style.display = 'block';
     populateTagSelector(itemToEdit.tags || []);
+    checkDuplicateIdentifier();
 
     if (itemToEdit.imageUrl) {
       updateImagePreview(itemToEdit.imageUrl);
@@ -149,6 +182,7 @@ export function showAddItemView(itemId = null) {
       if (existingItem) {
         populateTagSelector(existingItem.tags || []);
         if (itemImageUrlInput) itemImageUrlInput.value = existingItem.imageUrl || '';
+        if (itemIdentifierInput) itemIdentifierInput.value = existingItem.identifier || '';
         currentEditingActors = existingItem.actors ? [...existingItem.actors] : [];
         if (existingItem.imageUrl) {
           updateImagePreview(existingItem.imageUrl);
@@ -158,7 +192,17 @@ export function showAddItemView(itemId = null) {
         currentEditingActors = [];
       }
 
+      // 若識別碼尚未填寫，根據規則自動提取
+      if (itemIdentifierInput && !itemIdentifierInput.value && currentTab.url) {
+        const extracted = identifierRuleStore.extractIdentifier(currentTab.url);
+        if (extracted) {
+          itemIdentifierInput.value = extracted;
+          itemIdentifierInput.dataset.autoFilled = 'true';
+        }
+      }
+
       renderActorChips();
+      checkDuplicateIdentifier();
 
       if (currentTab.url && (!existingItem || !existingItem.imageUrl)) {
         tryFetchImage(currentTab.url, false);
@@ -254,9 +298,44 @@ function tryFetchImage(url, forceUpdate = false) {
   }
 }
 
+function checkDuplicateIdentifier() {
+  if (!itemIdentifierInput || !identifierWarning) return;
+  const val = itemIdentifierInput.value.trim();
+  if (!val) {
+    identifierWarning.style.display = 'none';
+    identifierWarning.textContent = '';
+    return;
+  }
+
+  const duplicate = collectionStore.findItemByIdentifier(val, editingItemId);
+  if (duplicate) {
+    identifierWarning.style.display = 'block';
+    identifierWarning.textContent = '';
+
+    const warningSpan = document.createElement('span');
+    warningSpan.textContent = `⚠️ Identifier already assigned to "${duplicate.title}". `;
+
+    const inspectLink = document.createElement('a');
+    inspectLink.href = '#';
+    inspectLink.id = 'inspectDuplicateLink';
+    inspectLink.textContent = `Inspect: "${duplicate.title}"`;
+    inspectLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      showAddItemView(duplicate.id);
+    });
+
+    identifierWarning.appendChild(warningSpan);
+    identifierWarning.appendChild(inspectLink);
+  } else {
+    identifierWarning.style.display = 'none';
+    identifierWarning.textContent = '';
+  }
+}
+
 async function handleSave() {
   const title = itemTitleInput ? itemTitleInput.value.trim() : '';
   const url = itemUrlInput ? itemUrlInput.value.trim() : '';
+  const identifier = itemIdentifierInput ? itemIdentifierInput.value.trim() : '';
   const imageUrl = itemImageUrlInput ? itemImageUrlInput.value.trim() : '';
   const actors = currentEditingActors;
 
@@ -270,6 +349,7 @@ async function handleSave() {
       id: editingItemId,
       title,
       url,
+      identifier: identifier || null,
       tags: selectedTags,
       imageUrl: imageUrl || null,
       actors: actors

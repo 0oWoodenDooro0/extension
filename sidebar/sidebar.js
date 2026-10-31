@@ -8,6 +8,7 @@ import { initCloudSyncView } from './cloudSyncView.js';
 import { initItemsView, displayItemsByTag, refreshItemsList } from './itemsView.js';
 import { initAddItemView, showAddItemView } from './addItemView.js';
 import { initManageTagsView, showManageTagsView, displayManageTagList } from './manageTagsView.js';
+import { highlightAndScrollToItem } from './highlightHelper.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
   // --- Elements (Layout) ---
@@ -188,6 +189,32 @@ document.addEventListener('DOMContentLoaded', async () => {
       refreshItemsList();
     }
   });
+
+  // --- Runtime Message Listener (reveal / focus item from in-page indicators) ---
+  if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.onMessage?.addListener === 'function') {
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+      if (request && (request.action === 'revealItem' || request.action === 'focusItem')) {
+        const targetId = request.itemId || (request.item && request.item.id);
+        if (targetId) {
+          showView(itemsView);
+          displayMainLibrary();
+          setTimeout(() => {
+            const listItem = document.getElementById(`item-${targetId}`);
+            if (listItem) {
+              highlightAndScrollToItem(listItem, {
+                duration: 3000,
+                scrollBehavior: 'smooth',
+                scrollBlock: 'center',
+                realignOnImageLoad: true
+              });
+            }
+          }, 50);
+          if (typeof sendResponse === 'function') sendResponse({ success: true });
+          return true;
+        }
+      }
+    });
+  }
 
   // --- Initial Load & Startup Auto-Login Sync ---
   try {

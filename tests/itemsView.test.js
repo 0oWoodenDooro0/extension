@@ -8,6 +8,9 @@ import {
   getActiveFilters,
   resetFilters
 } from '../sidebar/itemsView.js';
+import { initAddItemView, showAddItemView } from '../sidebar/addItemView.js';
+import { collectionStore, MemoryStorageAdapter } from '../sidebar/store.js';
+import { identifierRuleStore } from '../identifierRuleStore.js';
 import { tabAdapter } from '../tabAdapter.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -71,12 +74,24 @@ function createMockDocument() {
       },
       set innerText(val) {
         _text = String(val);
+        childNodes.length = 0;
+        children.length = 0;
       },
       get textContent() {
         return _text || childNodes.map(n => n.textContent || n.innerText || '').join('');
       },
       set textContent(val) {
         _text = String(val);
+        childNodes.length = 0;
+        children.length = 0;
+      },
+      get innerHTML() {
+        return childNodes.map(n => n.textContent || '').join('');
+      },
+      set innerHTML(val) {
+        _text = '';
+        childNodes.length = 0;
+        children.length = 0;
       },
       get children() {
         return children;
@@ -667,6 +682,270 @@ describe('Collection Item Card Tag Click-to-Filter & Event Isolation (Ticket #15
       const hoverRuleMatch = sidebarHtml.match(/(?:^|[,\s}])([^{}]*\.item-tag:hover[^{]*)\{([^}]+)\}/);
       assert.ok(hoverRuleMatch, 'CSS rule for .item-tag:hover should exist in sidebar.html');
       assert.match(hoverRuleMatch[2], /text-decoration\s*:\s*underline/i, 'Must have text-decoration: underline');
+    });
+  });
+
+  describe('Add/Edit Item View Identifier & Duplicate Warning (Ticket #19)', () => {
+    let mockDoc;
+    let originalDoc;
+    let formElements;
+    let adapter;
+
+    function setupForm(doc) {
+      const ids = [
+        'itemTitleInput', 'itemUrlInput', 'itemIdentifierInput', 'identifierWarning',
+        'itemImageUrlInput', 'fetchImageButton', 'imagePreviewContainer', 'imagePreview',
+        'imagePreviewStatus', 'itemActorInput', 'addActorButton', 'selectedActorsContainer',
+        'actorSuggestions', 'existingTagsContainer', 'saveItemButton', 'cancelButton',
+        'deleteItemButton'
+      ];
+      const elements = {};
+      for (const id of ids) {
+        const tag = id.includes('Button') ? 'button' : id.includes('Input') ? 'input' : 'div';
+        const el = doc.createElement(tag);
+        el.id = id;
+        el.value = '';
+        elements[id] = el;
+      }
+      return elements;
+    }
+
+    beforeEach(async () => {
+      originalDoc = globalThis.document;
+      mockDoc = createMockDocument();
+      globalThis.document = mockDoc;
+      formElements = setupForm(mockDoc);
+
+      adapter = new MemoryStorageAdapter();
+      collectionStore.adapter = adapter;
+      collectionStore.items = [];
+      collectionStore.tags = [];
+      await collectionStore.load();
+    });
+
+    afterEach(() => {
+      globalThis.document = originalDoc;
+    });
+
+    it('pre-fills identifier input in edit mode and does not trigger duplicate warning against itself', async () => {
+      const item = await collectionStore.saveItem({
+        title: 'Original Item',
+        url: 'https://example.com/item1',
+        identifier: 'BOOK-001'
+      });
+
+      initAddItemView({});
+      showAddItemView(item.id);
+
+      assert.strictEqual(formElements.itemIdentifierInput.value, 'BOOK-001');
+      assert.strictEqual(formElements.identifierWarning.style.display, 'none');
+    });
+
+    it('renders soft warning containing conflicting item title when entered identifier matches another item', async () => {
+      await collectionStore.saveItem({
+        title: 'Conflicting Book',
+        url: 'https://example.com/conflict',
+        identifier: 'BOOK-999'
+      });
+
+      initAddItemView({});
+      showAddItemView(null);
+
+      formElements.itemIdentifierInput.value = '  book-999  ';
+      formElements.itemIdentifierInput.dispatchEvent({ type: 'input' });
+
+      assert.strictEqual(formElements.identifierWarning.style.display, 'block');
+      assert.match(formElements.identifierWarning.textContent, /Conflicting Book/);
+    });
+
+    it('renders a clickable inspect link for conflicting duplicate item and clicking it inspects/edits conflicting item', async () => {
+      await collectionStore.saveItem({
+        title: 'Original Existing Book',
+        url: 'https://example.com/existing-book',
+        identifier: 'BOOK-DUPE'
+      });
+
+      initAddItemView({});
+      showAddItemView(null);
+
+      formElements.itemTitleInput.value = 'New Item Attempt';
+      formElements.itemIdentifierInput.value = 'BOOK-DUPE';
+      formElements.itemIdentifierInput.dispatchEvent({ type: 'input' });
+
+      assert.strictEqual(formElements.identifierWarning.style.display, 'block');
+      const inspectLink = formElements.identifierWarning.querySelector('#inspectDuplicateLink');
+      assert.ok(inspectLink, 'Should render #inspectDuplicateLink');
+      assert.match(inspectLink.textContent, /Original Existing Book/);
+
+      // Clicking inspect link loads conflicting item into view
+      inspectLink.click();
+
+      assert.strictEqual(formElements.itemTitleInput.value, 'Original Existing Book');
+      assert.strictEqual(formElements.itemUrlInput.value, 'https://example.com/existing-book');
+      assert.strictEqual(formElements.itemIdentifierInput.value, 'BOOK-DUPE');
+      assert.strictEqual(formElements.identifierWarning.style.display, 'none');
+    });
+
+    it('clears warning when input becomes unique or empty', async () => {
+      await collectionStore.saveItem({
+        title: 'Existing Book',
+        url: 'https://example.com/existing',
+        identifier: 'BOOK-999'
+      });
+
+      initAddItemView({});
+      showAddItemView(null);
+
+      // Trigger conflict
+      formElements.itemIdentifierInput.value = 'BOOK-999';
+      formElements.itemIdentifierInput.dispatchEvent({ type: 'input' });
+      assert.strictEqual(formElements.identifierWarning.style.display, 'block');
+
+      // Change to unique
+      formElements.itemIdentifierInput.value = 'BOOK-1000';
+      formElements.itemIdentifierInput.dispatchEvent({ type: 'input' });
+      assert.strictEqual(formElements.identifierWarning.style.display, 'none');
+      assert.strictEqual(formElements.identifierWarning.textContent, '');
+
+      // Change to empty
+      formElements.itemIdentifierInput.value = '   ';
+      formElements.itemIdentifierInput.dispatchEvent({ type: 'input' });
+      assert.strictEqual(formElements.identifierWarning.style.display, 'none');
+    });
+
+    it('allows saving successfully even with active duplicate warning without disabling save button', async () => {
+      await collectionStore.saveItem({
+        title: 'First Item',
+        url: 'https://example.com/first',
+        identifier: 'SHARED-ID'
+      });
+
+      let saved = false;
+      initAddItemView({
+        onSave: () => { saved = true; }
+      });
+      showAddItemView(null);
+
+      formElements.itemTitleInput.value = 'Second Item';
+      formElements.itemUrlInput.value = 'https://example.com/second';
+      formElements.itemIdentifierInput.value = 'SHARED-ID';
+      formElements.itemIdentifierInput.dispatchEvent({ type: 'input' });
+
+      // Soft warning is active
+      assert.strictEqual(formElements.identifierWarning.style.display, 'block');
+      // Save button remains enabled
+      assert.notStrictEqual(formElements.saveItemButton.disabled, true);
+
+      // Clicking save proceeds normally
+      formElements.saveItemButton.click();
+      await new Promise(resolve => setTimeout(resolve, 10));
+      assert.strictEqual(saved, true);
+
+      const items = collectionStore.getItems();
+      assert.strictEqual(items.length, 2);
+      const secondItem = items.find(i => i.title === 'Second Item');
+      assert.ok(secondItem);
+      assert.strictEqual(secondItem.identifier, 'SHARED-ID');
+    });
+
+    it('auto-populates identifier input when matching URL is entered into itemUrlInput', async () => {
+      await identifierRuleStore.saveRule({
+        name: 'GitHub Issues',
+        urlPattern: 'github.com',
+        extractionRegex: 'issues/(\\d+)'
+      });
+
+      initAddItemView({});
+      showAddItemView(null);
+
+      formElements.itemUrlInput.value = 'https://github.com/0oWoodenDooro0/extension/issues/20';
+      formElements.itemUrlInput.dispatchEvent({ type: 'input' });
+
+      assert.strictEqual(formElements.itemIdentifierInput.value, '20');
+      assert.strictEqual(formElements.identifierWarning.style.display, 'none');
+    });
+
+    it('auto-populates identifier input from active tab URL when opening Add Item view', async () => {
+      await identifierRuleStore.saveRule({
+        name: 'Jira Tickets',
+        urlPattern: 'jira.atlassian.com',
+        extractionRegex: 'browse/([A-Z]+-\\d+)'
+      });
+
+      const originalGetActiveTab = tabAdapter.getActiveTab;
+      tabAdapter.getActiveTab = async () => ({
+        id: 77,
+        title: 'Issue EXT-42',
+        url: 'https://jira.atlassian.com/browse/EXT-42'
+      });
+
+      try {
+        initAddItemView({});
+        showAddItemView(null);
+
+        // Allow microtask resolution for tabAdapter.getActiveTab()
+        await new Promise(resolve => setTimeout(resolve, 10));
+
+        assert.strictEqual(formElements.itemIdentifierInput.value, 'EXT-42');
+        assert.strictEqual(formElements.identifierWarning.style.display, 'none');
+      } finally {
+        tabAdapter.getActiveTab = originalGetActiveTab;
+      }
+    });
+
+    it('auto-populates identifier and immediately triggers duplicate warning if conflicting item exists', async () => {
+      await collectionStore.saveItem({
+        title: 'Existing Conflict Item',
+        url: 'https://other.com/conflict',
+        identifier: 'CONFLICT-88'
+      });
+      await identifierRuleStore.saveRule({
+        name: 'Conflict Rule',
+        urlPattern: 'example.com',
+        extractionRegex: 'token-([A-Z0-9-]+)'
+      });
+
+      initAddItemView({});
+      showAddItemView(null);
+
+      formElements.itemUrlInput.value = 'https://example.com/token-CONFLICT-88';
+      formElements.itemUrlInput.dispatchEvent({ type: 'input' });
+
+      assert.strictEqual(formElements.itemIdentifierInput.value, 'CONFLICT-88');
+      assert.strictEqual(formElements.identifierWarning.style.display, 'block');
+      assert.match(formElements.identifierWarning.textContent, /Existing Conflict Item/);
+    });
+
+    it('does not overwrite manually edited identifier when changing URL', async () => {
+      await identifierRuleStore.saveRule({
+        name: 'GitHub Issues',
+        urlPattern: 'github.com',
+        extractionRegex: 'issues/(\\d+)'
+      });
+
+      initAddItemView({});
+      showAddItemView(null);
+
+      // User manually enters a custom identifier first
+      formElements.itemIdentifierInput.value = 'MANUAL-CUSTOM-ID';
+      formElements.itemIdentifierInput.dispatchEvent({ type: 'input' });
+
+      // User enters URL matching a rule
+      formElements.itemUrlInput.value = 'https://github.com/foo/bar/issues/99';
+      formElements.itemUrlInput.dispatchEvent({ type: 'input' });
+
+      // Must preserve the user's manual input
+      assert.strictEqual(formElements.itemIdentifierInput.value, 'MANUAL-CUSTOM-ID');
+    });
+
+    it('defines itemIdentifierInput, identifierWarning, and CSS warning styling in sidebar.html', () => {
+      assert.match(sidebarHtml, /id="itemIdentifierInput"/, 'sidebar.html must contain #itemIdentifierInput');
+      assert.match(sidebarHtml, /id="identifierWarning"/, 'sidebar.html must contain #identifierWarning');
+
+      const warningCssMatch = sidebarHtml.match(/(?:^|[,\s}])([^{}]*\.identifier-warning\b[^{]*)\{([^}]+)\}/);
+      assert.ok(warningCssMatch, 'CSS rule for .identifier-warning should exist in sidebar.html');
+      assert.match(warningCssMatch[2], /color\s*:/i, 'Must define color in .identifier-warning');
+      assert.match(warningCssMatch[2], /background-color\s*:/i, 'Must define background-color in .identifier-warning');
     });
   });
 });

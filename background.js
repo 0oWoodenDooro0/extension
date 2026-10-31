@@ -1,6 +1,7 @@
 import { initializeSearchShortcuts } from './utils.js';
 import { collectionStore, ChromeStorageAdapter } from './sidebar/store.js';
 import { searchEngineStore } from './searchEngineStore.js';
+import { identifierRuleStore } from './identifierRuleStore.js';
 import { GoogleDriveAdapter } from './sidebar/googleDriveAdapter.js';
 import { SyncCoordinator } from './sidebar/syncCoordinator.js';
 
@@ -15,6 +16,7 @@ export const bgSyncCoordinator = new SyncCoordinator({
   cloudAdapter: bgGoogleDriveAdapter,
   collectionStore,
   searchEngineStore,
+  identifierRuleStore,
   storage: bgStorageAdapter,
   autoSyncDebounceMs: 3000
 });
@@ -37,7 +39,9 @@ export async function initializeBackgroundSync(
       if (coordinator.isApplyingRemoteSync) return;
       if (changes.sync_in_progress && changes.sync_in_progress.newValue === true) return;
 
-      const hasDataChange = Boolean(changes.items || changes.tags || changes.searchEngines);
+      const hasDataChange = Boolean(
+        changes.items || changes.tags || changes.searchEngines || changes.identifierRules
+      );
       if (!hasDataChange) return;
 
       await coordinator.markDirty();
@@ -283,8 +287,9 @@ export function isValidWebUrl(url) {
  * 注入至網頁 DOM 中的浮動 Toast 提示函式
  * @param {string} message 
  * @param {boolean} isExisting 
+ * @param {boolean} [isDuplicate=false]
  */
-export function inPageToast(message, isExisting) {
+export function inPageToast(message, isExisting, isDuplicate = false) {
   const TOAST_ID = '__collection_ext_toast__';
   const existingToast = document.getElementById(TOAST_ID);
   if (existingToast) {
@@ -295,13 +300,20 @@ export function inPageToast(message, isExisting) {
   toast.id = TOAST_ID;
   toast.innerText = message;
 
+  const bgColor = isDuplicate
+    ? 'rgba(217, 119, 6, 0.95)'
+    : isExisting
+      ? 'rgba(30, 64, 175, 0.94)'
+      : 'rgba(16, 185, 129, 0.94)';
+
   Object.assign(toast.style, {
     position: 'fixed',
     top: '20px',
     right: '20px',
     zIndex: '2147483647',
     padding: '10px 18px',
-    background: isExisting ? 'rgba(30, 64, 175, 0.94)' : 'rgba(16, 185, 129, 0.94)',
+    background: bgColor,
+    border: isDuplicate ? '1px solid rgba(253, 230, 138, 0.4)' : 'none',
     backdropFilter: 'blur(8px)',
     WebkitBackdropFilter: 'blur(8px)',
     color: '#ffffff',
@@ -323,11 +335,17 @@ export function inPageToast(message, isExisting) {
     toast.style.transform = 'translateY(0) scale(1)';
   });
 
-  setTimeout(() => {
+  const timer = setTimeout(() => {
     toast.style.opacity = '0';
     toast.style.transform = 'translateY(-10px) scale(0.96)';
-    setTimeout(() => toast.remove(), 260);
+    const subTimer = setTimeout(() => toast.remove(), 260);
+    if (subTimer && typeof subTimer.unref === 'function') {
+      subTimer.unref();
+    }
   }, 2000);
+  if (timer && typeof timer.unref === 'function') {
+    timer.unref();
+  }
 }
 
 /**
@@ -335,35 +353,55 @@ export function inPageToast(message, isExisting) {
  * @param {Object} tab 
  * @param {Object} options 
  */
-export async function showSaveFeedback(tab, { isExisting = false, title = '' } = {}) {
+export async function showSaveFeedback(
+  tab,
+  { isExisting = false, title = '', isDuplicate = false, duplicateTitle = '' } = {}
+) {
   if (!tab || !tab.id) return;
 
   // 1. 擴充圖示 Badge 提示
   if (typeof chrome !== 'undefined' && chrome.action && chrome.action.setBadgeText) {
     try {
-      chrome.action.setBadgeText({ text: '✓', tabId: tab.id });
+      const badgeText = isDuplicate ? '!' : '✓';
+      const badgeColor = isDuplicate ? '#D97706' : isExisting ? '#2563EB' : '#10B981';
+
+      chrome.action.setBadgeText({ text: badgeText, tabId: tab.id });
       chrome.action.setBadgeBackgroundColor({
-        color: isExisting ? '#2563EB' : '#10B981',
+        color: badgeColor,
         tabId: tab.id
       });
-      setTimeout(() => {
+      const badgeTimer = setTimeout(() => {
         try {
           chrome.action.setBadgeText({ text: '', tabId: tab.id });
         } catch {}
       }, 2000);
+      if (badgeTimer && typeof badgeTimer.unref === 'function') {
+        badgeTimer.unref();
+      }
     } catch {}
   }
 
   // 2. 網頁內嵌浮動 Toast HUD 提示
   if (typeof chrome !== 'undefined' && chrome.scripting && chrome.scripting.executeScript) {
     try {
-      const displayTitle = title ? (title.length > 32 ? title.slice(0, 32) + '...' : title) : 'Page';
-      const msg = isExisting ? `✓ 已更新收藏：${displayTitle}` : `✓ 已收藏至 Collection：${displayTitle}`;
+      let msg;
+      if (isDuplicate) {
+        const conflictTitle = duplicateTitle
+          ? (duplicateTitle.length > 25 ? duplicateTitle.slice(0, 25) + '...' : duplicateTitle)
+          : '現有項目';
+        msg = `⚠️ 衝突：識別碼與「${conflictTitle}」重複`;
+      } else if (isExisting) {
+        const displayTitle = title ? (title.length > 32 ? title.slice(0, 32) + '...' : title) : 'Page';
+        msg = `✓ 已更新收藏：${displayTitle}`;
+      } else {
+        const displayTitle = title ? (title.length > 32 ? title.slice(0, 32) + '...' : title) : 'Page';
+        msg = `✓ 已收藏至 Collection：${displayTitle}`;
+      }
 
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: inPageToast,
-        args: [msg, isExisting]
+        args: [msg, isExisting, isDuplicate]
       });
     } catch {
       // 忽略受保護網頁的腳本注入錯誤
@@ -375,13 +413,13 @@ export async function showSaveFeedback(tab, { isExisting = false, title = '' } =
  * 直接保存作用中分頁至 Collection (供快捷鍵或 Context Menu 呼叫)
  * @param {Object|null} tab - 目標分頁物件，為空時自動查詢當前作用中分頁
  * @param {Object} store - CollectionStore 實例
- * @param {Object} [options] - 額外選項 (如 resolveImage 圖片解析注入)
+ * @param {Object} [options] - 額外選項 (如 resolveImage 圖片解析注入, ruleStore 規則存儲注入)
  * @returns {Promise<Object>}
  */
 export async function saveActiveTabDirectly(
   tab = null,
   store = collectionStore,
-  { resolveImage = getImageForUrl } = {}
+  { resolveImage = getImageForUrl, ruleStore = identifierRuleStore } = {}
 ) {
   let targetTab = tab;
   if (!targetTab && typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
@@ -396,6 +434,9 @@ export async function saveActiveTabDirectly(
   if (!store.isLoaded) {
     await store.load();
   }
+  if (ruleStore && !ruleStore.isLoaded && typeof ruleStore.load === 'function') {
+    await ruleStore.load();
+  }
 
   const existingItem = store.getItemByUrl(targetTab.url);
   const imageUrl = (existingItem && existingItem.imageUrl)
@@ -404,24 +445,40 @@ export async function saveActiveTabDirectly(
 
   const title = (targetTab.title && targetTab.title.trim()) || existingItem?.title || targetTab.url;
 
+  // 自動從 active tab URL 根據規則提取 identifier
+  let identifier = existingItem?.identifier;
+  if (!identifier && ruleStore) {
+    identifier = ruleStore.extractIdentifier(targetTab.url);
+  }
+
+  // 檢查提取出的識別碼是否重複於收藏庫中其他項目
+  const duplicateItem = identifier
+    ? store.findItemByIdentifier(identifier, existingItem ? existingItem.id : null)
+    : null;
+
   const savedItem = await store.saveItem({
     id: existingItem ? existingItem.id : undefined,
     title: title,
     url: targetTab.url,
     imageUrl: imageUrl || null,
     tags: existingItem ? existingItem.tags : [],
-    actors: existingItem ? existingItem.actors : []
+    actors: existingItem ? existingItem.actors : [],
+    identifier: identifier || undefined
   });
 
   await showSaveFeedback(targetTab, {
     isExisting: !!existingItem,
-    title: savedItem.title
+    title: savedItem.title,
+    isDuplicate: !!duplicateItem,
+    duplicateTitle: duplicateItem ? duplicateItem.title : ''
   });
 
   return {
     success: true,
     item: savedItem,
-    isExisting: !!existingItem
+    isExisting: !!existingItem,
+    isDuplicate: !!duplicateItem,
+    duplicateItem: duplicateItem || null
   };
 }
 

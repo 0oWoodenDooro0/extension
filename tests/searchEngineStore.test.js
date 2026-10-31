@@ -177,4 +177,35 @@ describe('SearchEngineStore & Context-Menu Search', () => {
       assert.strictEqual(events.length, 2);
     });
   });
+
+  describe('Popup UI Elements (popup/popup.html)', () => {
+    it('defines navigation tabs and form containers for both Search Shortcuts and Identifier Rules', async () => {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const htmlPath = path.resolve(process.cwd(), 'popup/popup.html');
+      const htmlContent = fs.readFileSync(htmlPath, 'utf8');
+
+      // Tabs Header
+      assert.ok(htmlContent.includes('id="tabShortcutsBtn"'));
+      assert.ok(htmlContent.includes('id="tabRulesBtn"'));
+
+      // Search Shortcuts Section
+      assert.ok(htmlContent.includes('id="shortcutsSection"'));
+      assert.ok(htmlContent.includes('id="shortcutsList"'));
+      assert.ok(htmlContent.includes('id="engineTitle"'));
+      assert.ok(htmlContent.includes('id="engineUrl"'));
+      assert.ok(htmlContent.includes('id="engineRegex"'));
+      assert.ok(htmlContent.includes('id="engineReplacement"'));
+
+      // Identifier Rules Section
+      assert.ok(htmlContent.includes('id="rulesSection"'));
+      assert.ok(htmlContent.includes('id="ruleList"'));
+      assert.ok(htmlContent.includes('id="ruleName"'));
+      assert.ok(htmlContent.includes('id="rulePattern"'));
+      assert.ok(htmlContent.includes('id="ruleRegex"'));
+      assert.ok(htmlContent.includes('id="ruleReplacement"'));
+      assert.ok(htmlContent.includes('id="ruleTestUrl"'));
+      assert.ok(htmlContent.includes('id="ruleTestPreview"'));
+    });
+  });
 });

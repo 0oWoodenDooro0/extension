@@ -319,6 +319,27 @@
         .preview-status {
             font-weight: 500;
         }
+        .identifier-warning {
+            display: none;
+            color: #b45309;
+            background-color: #fef3c7;
+            border: 1px solid #fde68a;
+            border-radius: 4px;
+            padding: 6px 10px;
+            margin-top: 6px;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        .identifier-warning a {
+            color: #b45309;
+            font-weight: 600;
+            text-decoration: underline;
+            cursor: pointer;
+            margin-left: 4px;
+        }
+        .identifier-warning a:hover {
+            color: #92400e;
+        }
         .view-footer {
             padding: 10px;
             border-top: 1px solid #eee;
@@ -443,6 +464,11 @@
         <div class="form-group">
             <label for="itemUrlInput">URL</label>
             <input type="url" id="itemUrlInput">
+        </div>
+        <div class="form-group">
+            <label for="itemIdentifierInput">Identifier</label>
+            <input type="text" id="itemIdentifierInput" placeholder="Optional identifier">
+            <div id="identifierWarning" class="identifier-warning" style="display: none;"></div>
         </div>
         <div class="form-group">
             <label for="itemImageUrlInput">Image URL</label>
