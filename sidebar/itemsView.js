@@ -116,16 +116,20 @@ function setupListEventDelegation() {
   });
 }
 
+export function refreshItemsView() {
+  populateTagFilterBar();
+  populateActorFilterOptions();
+  renderActorFilterChips();
+  refreshItemsList();
+}
+
 export function displayItemsByTag(tag) {
   if (tag && tag !== "All Items") {
     activeFilters = [tag];
   } else {
     activeFilters = [];
   }
-  populateTagFilterBar();
-  populateActorFilterOptions();
-  renderActorFilterChips();
-  refreshItemsList();
+  refreshItemsView();
 }
 
 export function refreshItemsList() {

@@ -6,7 +6,7 @@ import { exportBackupFile, restoreUnifiedBackup } from './backupCoordinator.js';
 import { GoogleDriveAdapter } from './googleDriveAdapter.js';
 import { SyncCoordinator } from './syncCoordinator.js';
 import { initCloudSyncView } from './cloudSyncView.js';
-import { initItemsView, displayItemsByTag, refreshItemsList } from './itemsView.js';
+import { initItemsView, displayItemsByTag, refreshItemsList, refreshItemsView } from './itemsView.js';
 import { initAddItemView, showAddItemView } from './addItemView.js';
 import { initManageTagsView, showManageTagsView, displayManageTagList } from './manageTagsView.js';
 import { highlightAndScrollToItem } from './highlightHelper.js';
@@ -146,7 +146,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function handleAddEditFinished() {
-    displayMainLibrary();
+    showView(itemsView);
+    refreshItemsView();
   }
 
   // --- Import/Export Logic ---
