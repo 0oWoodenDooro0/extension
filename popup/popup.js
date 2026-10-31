@@ -1,5 +1,6 @@
 import { searchEngineStore } from '../searchEngineStore.js';
 import { identifierRuleStore, extractIdentifierFromUrl } from '../identifierRuleStore.js';
+import { formatKeyboardEvent } from '../content/shortcutHandler.js';
 
 document.addEventListener("DOMContentLoaded", async () => {
     // 建立 Popup 生命週期連線至 background.js，關閉 Popup 時自動觸發背景 Flush Sync
@@ -66,6 +67,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     const engineUrlInput = document.getElementById("engineUrl");
     const engineRegexInput = document.getElementById("engineRegex");
     const engineReplacementInput = document.getElementById("engineReplacement");
+    const engineShortcutInput = document.getElementById("engineShortcut");
+    const clearShortcutBtn = document.getElementById("clearShortcutBtn");
 
     // Buttons
     const addBtn = document.getElementById("addBtn");
@@ -107,6 +110,15 @@ document.addEventListener("DOMContentLoaded", async () => {
                 info.appendChild(regexMeta);
             }
 
+            if (engine.shortcut) {
+                const shortcutMeta = document.createElement("div");
+                shortcutMeta.className = "card-tag";
+                shortcutMeta.style.backgroundColor = "#e2e8f0";
+                shortcutMeta.style.fontWeight = "600";
+                shortcutMeta.textContent = `⌨️ ${engine.shortcut}`;
+                info.appendChild(shortcutMeta);
+            }
+
             const actions = document.createElement("div");
             actions.className = "actions";
 
@@ -139,6 +151,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             engineUrlInput.value = engine.urlTemplate;
             engineRegexInput.value = engine.queryRegex || "";
             engineReplacementInput.value = engine.queryReplacement || "";
+            engineShortcutInput.value = engine.shortcut || "";
         } else {
             formTitle.textContent = "Add Search Shortcut";
             engineIdInput.value = "";
@@ -146,6 +159,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             engineUrlInput.value = "";
             engineRegexInput.value = "";
             engineReplacementInput.value = "";
+            engineShortcutInput.value = "";
         }
         engineTitleInput.focus();
     }
@@ -167,6 +181,17 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         const regex = engineRegexInput.value.trim() || null;
         const replacement = engineReplacementInput.value.trim() || null;
+        const shortcut = engineShortcutInput.value.trim() || null;
+
+        if (shortcut) {
+            const existing = searchEngineStore.getEngines().find(
+                e => e.shortcut && e.shortcut.toLowerCase() === shortcut.toLowerCase() && e.id !== id
+            );
+            if (existing) {
+                alert(`Shortcut "${shortcut}" is already assigned to "${existing.title}". Please choose a different shortcut.`);
+                return;
+            }
+        }
 
         try {
             await searchEngineStore.saveEngine({
@@ -174,7 +199,8 @@ document.addEventListener("DOMContentLoaded", async () => {
                 title,
                 urlTemplate: url,
                 queryRegex: regex,
-                queryReplacement: replacement
+                queryReplacement: replacement,
+                shortcut
             });
             closeForm();
             renderList();
@@ -191,6 +217,25 @@ document.addEventListener("DOMContentLoaded", async () => {
             }
         }
     }
+
+    // Keyboard shortcut recording
+    engineShortcutInput.addEventListener("keydown", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.key === "Backspace" || e.key === "Delete") {
+            engineShortcutInput.value = "";
+            return;
+        }
+        const formatted = formatKeyboardEvent(e);
+        if (formatted) {
+            engineShortcutInput.value = formatted;
+        }
+    });
+
+    clearShortcutBtn.addEventListener("click", () => {
+        engineShortcutInput.value = "";
+        engineShortcutInput.focus();
+    });
 
     addBtn.addEventListener("click", () => openForm());
     cancelBtn.addEventListener("click", closeForm);

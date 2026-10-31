@@ -178,12 +178,18 @@ export class SearchEngineStore {
     return this.engines.find(e => e.id === id) || null;
   }
 
+  getEngineByShortcut(shortcut) {
+    if (!shortcut || typeof shortcut !== 'string') return null;
+    const clean = shortcut.trim().toLowerCase();
+    return this.engines.find(e => e.shortcut && e.shortcut.toLowerCase() === clean) || null;
+  }
+
   // --- 項目異動介面 (Mutation Interface) ---
 
   /**
    * 新增或更新搜尋引擎
    */
-  async saveEngine({ id, title, urlTemplate, queryRegex, queryReplacement }) {
+  async saveEngine({ id, title, urlTemplate, queryRegex, queryReplacement, shortcut }) {
     if (!title || !title.trim()) {
       throw new Error('Engine title is required.');
     }
@@ -195,6 +201,7 @@ export class SearchEngineStore {
     const cleanUrl = urlTemplate.trim();
     const cleanRegex = queryRegex && queryRegex.trim() ? queryRegex.trim() : null;
     const cleanReplacement = queryReplacement && queryReplacement.trim() ? queryReplacement.trim() : null;
+    const cleanShortcut = shortcut && shortcut.trim() ? shortcut.trim() : null;
     const now = Date.now();
 
     let targetEngine = null;
@@ -207,6 +214,7 @@ export class SearchEngineStore {
       targetEngine.urlTemplate = cleanUrl;
       targetEngine.queryRegex = cleanRegex;
       targetEngine.queryReplacement = cleanReplacement;
+      targetEngine.shortcut = cleanShortcut;
       targetEngine.updatedAt = now;
     } else {
       targetEngine = {
@@ -215,6 +223,7 @@ export class SearchEngineStore {
         urlTemplate: cleanUrl,
         queryRegex: cleanRegex,
         queryReplacement: cleanReplacement,
+        shortcut: cleanShortcut,
         updatedAt: now
       };
       this.engines.push(targetEngine);

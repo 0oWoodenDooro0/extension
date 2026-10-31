@@ -47,6 +47,37 @@ describe('SearchEngineStore & Context-Menu Search', () => {
       assert.strictEqual(await store.deleteEngine('non-existent-id'), false);
     });
 
+    it('supports custom shortcut key assignment, updating, clearing, and lookup by shortcut', async () => {
+      const created = await store.saveEngine({
+        title: 'Search on Mis',
+        urlTemplate: 'https://missav.ai/search/{id}',
+        shortcut: 'Alt+M'
+      });
+
+      assert.strictEqual(created.shortcut, 'Alt+M');
+      assert.strictEqual(store.getEngineByShortcut('Alt+M')?.id, created.id);
+      assert.strictEqual(store.getEngineByShortcut('alt+m')?.id, created.id);
+
+      const updated = await store.saveEngine({
+        id: created.id,
+        title: 'Search on Mis',
+        urlTemplate: 'https://missav.ai/search/{id}',
+        shortcut: 'Ctrl+Shift+S'
+      });
+      assert.strictEqual(updated.shortcut, 'Ctrl+Shift+S');
+      assert.strictEqual(store.getEngineByShortcut('Alt+M'), null);
+      assert.strictEqual(store.getEngineByShortcut('Ctrl+Shift+S')?.id, created.id);
+
+      const cleared = await store.saveEngine({
+        id: created.id,
+        title: 'Search on Mis',
+        urlTemplate: 'https://missav.ai/search/{id}',
+        shortcut: ''
+      });
+      assert.strictEqual(cleared.shortcut, null);
+      assert.strictEqual(store.getEngineByShortcut('Ctrl+Shift+S'), null);
+    });
+
     it('rejects saving a Search Engine when title or urlTemplate is missing', async () => {
       await assert.rejects(
         () => store.saveEngine({ title: '', urlTemplate: 'https://example.com?q={query}' }),
@@ -196,6 +227,8 @@ describe('SearchEngineStore & Context-Menu Search', () => {
       assert.ok(htmlContent.includes('id="engineUrl"'));
       assert.ok(htmlContent.includes('id="engineRegex"'));
       assert.ok(htmlContent.includes('id="engineReplacement"'));
+      assert.ok(htmlContent.includes('id="engineShortcut"'));
+      assert.ok(htmlContent.includes('id="clearShortcutBtn"'));
 
       // Identifier Rules Section
       assert.ok(htmlContent.includes('id="rulesSection"'));

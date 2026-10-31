@@ -1,4 +1,4 @@
-import { initializeSearchShortcuts } from './utils.js';
+import { initializeSearchShortcuts, performSearch } from './utils.js';
 import { collectionStore, ChromeStorageAdapter } from './sidebar/store.js';
 import { searchEngineStore } from './searchEngineStore.js';
 import { identifierRuleStore } from './identifierRuleStore.js';
@@ -268,6 +268,26 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
         .flushPendingSync({ force: !!request.force })
         .then(res => sendResponse(res))
         .catch(err => sendResponse({ success: false, error: err.message }));
+      return true;
+    }
+
+    // 監聽網頁內自訂快捷鍵搜尋請求 (In-Page Search Shortcut)
+    if (request.action === 'executeSearchShortcut' && request.engineId && request.query) {
+      (async () => {
+        if (!searchEngineStore.isLoaded) {
+          await searchEngineStore.load();
+        }
+        const engine = searchEngineStore.getEngineById(request.engineId);
+        if (engine) {
+          performSearch(request.query, engine, sender.tab);
+          sendResponse({ success: true });
+        } else {
+          sendResponse({ success: false, error: 'Engine not found' });
+        }
+      })().catch(err => {
+        console.error('[Background] executeSearchShortcut error:', err);
+        sendResponse({ success: false, error: err.message });
+      });
       return true;
     }
   });

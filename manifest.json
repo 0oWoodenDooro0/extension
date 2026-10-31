@@ -67,7 +67,8 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "content/indicatorScanner.js"
+        "content/indicatorScanner.js",
+        "content/shortcutHandler.js"
       ],
       "matches": [
         "http://*/*",
