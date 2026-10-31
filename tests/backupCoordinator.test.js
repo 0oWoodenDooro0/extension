@@ -1,5 +1,8 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { CollectionStore, MemoryStorageAdapter as CollectionMemoryAdapter } from '../sidebar/store.js';
 import { SearchEngineStore, MemoryStorageAdapter as SearchEngineMemoryAdapter } from '../searchEngineStore.js';
 import { IdentifierRuleStore, MemoryStorageAdapter as IdentifierMemoryAdapter } from '../identifierRuleStore.js';
@@ -10,6 +13,10 @@ import {
   restoreUnifiedBackup,
   exportBackupFile
 } from '../sidebar/backupCoordinator.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const sidebarJsContent = fs.readFileSync(path.resolve(__dirname, '../sidebar/sidebar.js'), 'utf8');
 
 describe('Unified Backup Coordinator', () => {
   let collectionStore;
@@ -236,5 +243,37 @@ describe('Unified Backup Coordinator', () => {
       const defaultRes = await exportBackupFile(collectionStore, searchEngineStore, tabAdapter);
       assert.strictEqual(defaultRes.filename, `collection_backup_${todayStr}.json`);
     });
+
+    it('exports identifierRules when identifierRuleStore is passed as 4th argument or with customFilename', async () => {
+      await identifierRuleStore.saveRule({
+        name: 'GitHub Issues',
+        urlPattern: 'github.com',
+        extractionRegex: 'issues/(\\d+)'
+      });
+
+      // When passed as 4th argument without customFilename
+      const resWithoutCustomName = await exportBackupFile(collectionStore, searchEngineStore, tabAdapter, identifierRuleStore);
+      assert.strictEqual(resWithoutCustomName.success, true);
+      assert.strictEqual(resWithoutCustomName.data.identifierRules.length, 1);
+      assert.strictEqual(resWithoutCustomName.data.identifierRules[0].name, 'GitHub Issues');
+      assert.strictEqual(tabAdapter.downloads[0].data.identifierRules.length, 1);
+      assert.strictEqual(tabAdapter.downloads[0].data.identifierRules[0].name, 'GitHub Issues');
+      const todayStr = new Date().toISOString().split('T')[0];
+      assert.strictEqual(resWithoutCustomName.filename, `collection_backup_${todayStr}.json`);
+
+      // When passed as 5th argument with customFilename
+      const resWithCustomName = await exportBackupFile(collectionStore, searchEngineStore, tabAdapter, 'custom_with_rules.json', identifierRuleStore);
+      assert.strictEqual(resWithCustomName.success, true);
+      assert.strictEqual(resWithCustomName.filename, 'custom_with_rules.json');
+      assert.strictEqual(resWithCustomName.data.identifierRules.length, 1);
+    });
+
+    it('sidebar.js connects identifierRuleStore to exportBackupFile, restoreUnifiedBackup, and SyncCoordinator', () => {
+      assert.match(sidebarJsContent, /import\s+.*identifierRuleStore.*from\s+['"]\.\.\/identifierRuleStore\.js['"]/);
+      assert.match(sidebarJsContent, /exportBackupFile\([^)]*identifierRuleStore[^)]*\)/);
+      assert.match(sidebarJsContent, /restoreUnifiedBackup\([^)]*identifierRuleStore[^)]*\)/);
+      assert.match(sidebarJsContent, /new\s+SyncCoordinator\([\s\S]*?identifierRuleStore[\s\S]*?\)/);
+    });
   });
 });
+

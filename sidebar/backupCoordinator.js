@@ -138,9 +138,16 @@ export async function exportBackupFile(
   customFilename = null,
   identifierRuleStore = null
 ) {
-  const backupData = await createUnifiedBackup(collectionStore, searchEngineStore, identifierRuleStore);
+  let resolvedFilename = customFilename;
+  let resolvedRuleStore = identifierRuleStore;
+  if (customFilename && typeof customFilename === 'object' && !identifierRuleStore) {
+    resolvedRuleStore = customFilename;
+    resolvedFilename = null;
+  }
+
+  const backupData = await createUnifiedBackup(collectionStore, searchEngineStore, resolvedRuleStore);
   const todayStr = new Date().toISOString().split('T')[0];
-  const filename = customFilename || `collection_backup_${todayStr}.json`;
+  const filename = resolvedFilename || `collection_backup_${todayStr}.json`;
 
   if (tabAdapter && typeof tabAdapter.downloadJson === 'function') {
     await tabAdapter.downloadJson(backupData, filename);

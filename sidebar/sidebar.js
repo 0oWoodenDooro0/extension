@@ -1,5 +1,6 @@
 import { collectionStore, ChromeStorageAdapter } from './store.js';
 import { searchEngineStore } from '../searchEngineStore.js';
+import { identifierRuleStore } from '../identifierRuleStore.js';
 import { tabAdapter } from '../tabAdapter.js';
 import { exportBackupFile, restoreUnifiedBackup } from './backupCoordinator.js';
 import { GoogleDriveAdapter } from './googleDriveAdapter.js';
@@ -32,6 +33,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     cloudAdapter: googleDriveAdapter,
     collectionStore,
     searchEngineStore,
+    identifierRuleStore,
     storage: storageAdapter
   });
   await syncCoordinator.init();
@@ -149,7 +151,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // --- Import/Export Logic ---
   async function exportData() {
-    await exportBackupFile(collectionStore, searchEngineStore, tabAdapter);
+    await exportBackupFile(collectionStore, searchEngineStore, tabAdapter, null, identifierRuleStore);
   }
 
   async function importData(event) {
@@ -160,12 +162,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
           const importedData = JSON.parse(e.target.result);
           const hasSearchEngines = importedData && Array.isArray(importedData.searchEngines);
-          const confirmMsg = hasSearchEngines
+          const hasIdentifierRules = importedData && Array.isArray(importedData.identifierRules);
+          const confirmMsg = (hasSearchEngines || hasIdentifierRules)
             ? "Overwrite collections and search shortcuts?"
             : "Overwrite collections?";
 
           if (confirm(confirmMsg)) {
-            const result = await restoreUnifiedBackup(importedData, { collectionStore, searchEngineStore });
+            const result = await restoreUnifiedBackup(importedData, {
+              collectionStore,
+              searchEngineStore,
+              identifierRuleStore
+            });
             if (result.success) {
               displayMainLibrary();
             } else {
