@@ -74,11 +74,27 @@ export function initAddItemView(injectedCallbacks) {
         itemIdentifierInput &&
         (!itemIdentifierInput.value || itemIdentifierInput.dataset.autoFilled === 'true')
       ) {
-        const extracted = identifierRuleStore.extractIdentifier(url);
-        if (extracted) {
-          itemIdentifierInput.value = extracted;
-          itemIdentifierInput.dataset.autoFilled = 'true';
-          checkDuplicateIdentifier();
+        const applyExtracted = () => {
+          const latestUrl = itemUrlInput ? itemUrlInput.value.trim() : '';
+          if (
+            latestUrl !== url ||
+            !itemIdentifierInput ||
+            (itemIdentifierInput.value && itemIdentifierInput.dataset.autoFilled !== 'true')
+          ) {
+            return;
+          }
+          const extracted = identifierRuleStore.extractIdentifier(latestUrl);
+          if (extracted) {
+            itemIdentifierInput.value = extracted;
+            itemIdentifierInput.dataset.autoFilled = 'true';
+            checkDuplicateIdentifier();
+          }
+        };
+
+        if (!identifierRuleStore.isLoaded && identifierRuleStore.getRules().length === 0) {
+          identifierRuleStore.load().then(applyExtracted);
+        } else {
+          applyExtracted();
         }
       }
 
@@ -165,7 +181,7 @@ export function showAddItemView(itemId = null) {
     if (deleteItemButton) deleteItemButton.style.display = 'none';
 
     // 從當前分頁抓取資訊
-    tabAdapter.getActiveTab().then(currentTab => {
+    tabAdapter.getActiveTab().then(async currentTab => {
       if (!currentTab) {
         populateTagSelector([]);
         currentEditingActors = [];
@@ -194,10 +210,15 @@ export function showAddItemView(itemId = null) {
 
       // 若識別碼尚未填寫，根據規則自動提取
       if (itemIdentifierInput && !itemIdentifierInput.value && currentTab.url) {
-        const extracted = identifierRuleStore.extractIdentifier(currentTab.url);
-        if (extracted) {
-          itemIdentifierInput.value = extracted;
-          itemIdentifierInput.dataset.autoFilled = 'true';
+        if (!identifierRuleStore.isLoaded && identifierRuleStore.getRules().length === 0) {
+          await identifierRuleStore.load();
+        }
+        if (!itemIdentifierInput.value && itemUrlInput && itemUrlInput.value === currentTab.url) {
+          const extracted = identifierRuleStore.extractIdentifier(currentTab.url);
+          if (extracted) {
+            itemIdentifierInput.value = extracted;
+            itemIdentifierInput.dataset.autoFilled = 'true';
+          }
         }
       }
 

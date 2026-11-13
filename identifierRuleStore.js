@@ -111,6 +111,7 @@ export class IdentifierRuleStore {
       if (this.isPersisting) return;
       if (changes.identifierRules && changes.identifierRules.newValue) {
         this.rules = changes.identifierRules.newValue;
+        this.isLoaded = true;
         this.notify({ type: 'sync', source: 'external' });
       }
     });
