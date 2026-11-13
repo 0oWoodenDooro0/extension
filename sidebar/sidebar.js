@@ -226,7 +226,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // --- Initial Load & Startup Auto-Login Sync ---
   try {
-    await collectionStore.load();
+    await Promise.all([
+      collectionStore.load(),
+      identifierRuleStore.load()
+    ]);
     displayMainLibrary();
 
     // 每次開啟側邊欄時，若已綁定雲端帳號則自動登入並執行 3-Way Sync
