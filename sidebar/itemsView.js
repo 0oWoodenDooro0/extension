@@ -32,20 +32,24 @@ export function initItemsView(injectedCallbacks) {
   // 搜尋防抖：延遲執行 refreshItemsList
   if (itemSearchInput) {
     itemSearchInput.addEventListener('input', () => {
-      if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+      cancelPendingSearch();
       searchDebounceTimer = setTimeout(() => {
+        searchDebounceTimer = null;
         refreshItemsList();
       }, 300);
     });
   }
 
-  const clearBtn = document.getElementById('clearSearchButton');
-  if (clearBtn) {
-    clearBtn.addEventListener('click', () => {
+  bindClearableFilterInput({
+    input: itemSearchInput,
+    clearButton: document.getElementById('clearSearchButton'),
+    hasValue: () => Boolean(itemSearchInput && itemSearchInput.value !== ''),
+    onClear: () => {
+      cancelPendingSearch();
       if (itemSearchInput) itemSearchInput.value = '';
       refreshItemsList();
-    });
-  }
+    }
+  });
 
   if (actorFilterInput) {
     actorFilterInput.addEventListener('input', (e) => {
@@ -60,6 +64,19 @@ export function initItemsView(injectedCallbacks) {
       }
     });
   }
+
+  bindClearableFilterInput({
+    input: actorFilterInput,
+    clearButton: document.getElementById('clearActorFilterButton'),
+    hasValue: () => Boolean(
+      (actorFilterInput && actorFilterInput.value !== '') || currentActorFilter !== ''
+    ),
+    onClear: () => {
+      if (actorFilterInput) actorFilterInput.value = '';
+      currentActorFilter = '';
+      refreshItemsList();
+    }
+  });
 
   if (addActorFilterButton) {
     addActorFilterButton.addEventListener('click', handleAddActorFilter);
@@ -137,6 +154,29 @@ export function refreshItemsList() {
 }
 
 // --- Internal Helper Functions ---
+
+function cancelPendingSearch() {
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = null;
+  }
+}
+
+function bindClearableFilterInput({ input, clearButton, hasValue, onClear }) {
+  if (clearButton) {
+    clearButton.addEventListener('click', onClear);
+  }
+
+  if (input) {
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || e.isComposing || !hasValue()) {
+        return;
+      }
+      e.preventDefault();
+      onClear();
+    });
+  }
+}
 
 function handleAddActorFilter() {
   const val = actorFilterInput ? actorFilterInput.value.trim() : '';
@@ -240,10 +280,12 @@ export function getActiveFilters() {
 }
 
 export function resetFilters() {
+  cancelPendingSearch();
   activeFilters = [];
   activeActorFilters = [];
   currentActorFilter = "";
   if (itemSearchInput) itemSearchInput.value = "";
+  if (actorFilterInput) actorFilterInput.value = "";
 }
 
 export function toggleFilter(filterKey) {

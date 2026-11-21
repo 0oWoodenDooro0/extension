@@ -177,14 +177,20 @@
             position: relative;
             margin-bottom: 8px;
         }
-        #itemSearchInput {
+        .clearable-input-wrapper {
+            position: relative;
+            flex-grow: 1;
+        }
+        #itemSearchInput,
+        #actorFilterInput {
             width: 100%;
             padding: 6px 24px 6px 8px;
             box-sizing: border-box;
             border: 1px solid #ccc;
             border-radius: 4px;
         }
-        #clearSearchButton {
+        #clearSearchButton,
+        #clearActorFilterButton {
             position: absolute;
             right: 5px;
             top: 50%;
@@ -206,7 +212,7 @@
             overflow-y: auto;
         }
         
-        #actorFilterInput, .form-group input {
+        .form-group input {
             width: 100%;
             padding: 6px;
             box-sizing: border-box;
@@ -440,7 +446,10 @@
         
         <div id="actorFilterContainer">
             <div style="display: flex; gap: 5px; margin-bottom: 5px;">
-                <input type="text" id="actorFilterInput" list="actorFilterDatalist" placeholder="Filter Actor..." style="flex-grow: 1;">
+                <div class="clearable-input-wrapper">
+                    <input type="text" id="actorFilterInput" list="actorFilterDatalist" placeholder="Filter Actor...">
+                    <button id="clearActorFilterButton" type="button" title="Clear actor filter">&times;</button>
+                </div>
                 <datalist id="actorFilterDatalist"></datalist>
                 <button id="addActorFilterButton" type="button" title="Add actor filter">Add</button>
             </div>

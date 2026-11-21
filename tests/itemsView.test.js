@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  initItemsView,
+  refreshItemsView,
   renderItemElement,
   getActiveFilters,
   resetFilters
@@ -145,6 +147,14 @@ function createMockDocument() {
         }
         return !event.defaultPrevented;
       },
+      focus() {
+        doc.activeElement = el;
+      },
+      blur() {
+        if (doc.activeElement === el) {
+          doc.activeElement = null;
+        }
+      },
       click() {
         let propagationStopped = false;
         let defaultPrevented = false;
@@ -241,6 +251,7 @@ function createMockDocument() {
   }
 
   const doc = {
+    activeElement: null,
     createElement,
     createTextNode,
     createDocumentFragment,
@@ -946,6 +957,303 @@ describe('Collection Item Card Tag Click-to-Filter & Event Isolation (Ticket #15
       assert.ok(warningCssMatch, 'CSS rule for .identifier-warning should exist in sidebar.html');
       assert.match(warningCssMatch[2], /color\s*:/i, 'Must define color in .identifier-warning');
       assert.match(warningCssMatch[2], /background-color\s*:/i, 'Must define background-color in .identifier-warning');
+    });
+  });
+});
+
+describe('Sidebar Search & Actor Filter Clear/Escape Parity', () => {
+  let originalDocument;
+  let mockDoc;
+  let elements;
+
+  function setupSidebarFilters(doc) {
+    const specs = [
+      ['itemList', 'ul'],
+      ['itemSearchInput', 'input'],
+      ['clearSearchButton', 'button'],
+      ['tagFilterContainer', 'div'],
+      ['actorFilterInput', 'input'],
+      ['clearActorFilterButton', 'button'],
+      ['actorFilterDatalist', 'datalist'],
+      ['addActorFilterButton', 'button'],
+      ['selectedActorFiltersContainer', 'div'],
+      ['randomButton', 'button'],
+      ['openAllButton', 'button']
+    ];
+    const map = {};
+    for (const [id, tag] of specs) {
+      const el = doc.createElement(tag);
+      el.id = id;
+      if (tag === 'input') {
+        el.value = '';
+      }
+      map[id] = el;
+    }
+    return map;
+  }
+
+  function createKeydownEvent(key, { isComposing = false } = {}) {
+    let defaultPrevented = false;
+    return {
+      type: 'keydown',
+      key,
+      isComposing,
+      get defaultPrevented() {
+        return defaultPrevented;
+      },
+      preventDefault() {
+        defaultPrevented = true;
+      }
+    };
+  }
+
+  function renderedIds() {
+    return elements.itemList.children.map(li => li.dataset.id);
+  }
+
+  beforeEach(async () => {
+    originalDocument = globalThis.document;
+    mockDoc = createMockDocument();
+    globalThis.document = mockDoc;
+    elements = setupSidebarFilters(mockDoc);
+
+    collectionStore.adapter = new MemoryStorageAdapter();
+    collectionStore.items = [];
+    collectionStore.tags = [];
+    await collectionStore.load();
+    await collectionStore.importData({
+      tags: ['Frontend', 'Backend'],
+      items: [
+        {
+          id: 'item-1',
+          title: 'React Documentation',
+          url: 'https://react.dev',
+          tags: ['Frontend'],
+          actors: ['Dan Abramov'],
+          addDate: 1000
+        },
+        {
+          id: 'item-2',
+          title: 'Node.js Backend Guide',
+          url: 'https://nodejs.org',
+          tags: ['Backend'],
+          actors: ['Ryan Dahl', 'Dan Abramov'],
+          addDate: 2000
+        },
+        {
+          id: 'item-3',
+          title: 'Python ML Notes',
+          url: 'https://python.org',
+          tags: [],
+          actors: ['Guido van Rossum'],
+          addDate: 3000
+        }
+      ]
+    });
+
+    resetFilters();
+    initItemsView({});
+    refreshItemsView();
+  });
+
+  afterEach(() => {
+    resetFilters();
+    globalThis.document = originalDocument;
+  });
+
+  describe('Main Search Bar (#itemSearchInput & #clearSearchButton)', () => {
+    it('cancels pending debounce, clears search input, and immediately refreshes Collection Items on #clearSearchButton click', (t) => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+
+      // Apply an active search first so the list is filtered
+      elements.itemSearchInput.value = 'react';
+      elements.itemSearchInput.dispatchEvent({ type: 'input' });
+      t.mock.timers.tick(300);
+      assert.deepStrictEqual(renderedIds(), ['item-1']);
+
+      // Type a new query leaving a pending debounce timer, then immediately click clear
+      elements.itemSearchInput.value = 'nonexistent';
+      elements.itemSearchInput.dispatchEvent({ type: 'input' });
+      elements.clearSearchButton.click();
+
+      assert.strictEqual(elements.itemSearchInput.value, '');
+      assert.deepStrictEqual(renderedIds(), ['item-3', 'item-2', 'item-1']);
+
+      // Pending debounce timer must have been cancelled (no redundant re-render after 300ms)
+      const firstNodeAfterClear = elements.itemList.children[0];
+      t.mock.timers.tick(350);
+      assert.ok(elements.itemList.children[0] === firstNodeAfterClear, 'Pending search debounce should be cancelled');
+    });
+
+    it('clears search input, cancels pending debounce, refreshes list, and keeps focus on Escape when non-empty', (t) => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+
+      elements.itemSearchInput.focus();
+      elements.itemSearchInput.value = 'dan react';
+      elements.itemSearchInput.dispatchEvent({ type: 'input' });
+      t.mock.timers.tick(300);
+      assert.deepStrictEqual(renderedIds(), ['item-1']);
+
+      // Start another pending debounce then press Escape
+      elements.itemSearchInput.value = 'python';
+      elements.itemSearchInput.dispatchEvent({ type: 'input' });
+
+      const escEvent = createKeydownEvent('Escape');
+      elements.itemSearchInput.dispatchEvent(escEvent);
+
+      assert.strictEqual(escEvent.defaultPrevented, true);
+      assert.strictEqual(elements.itemSearchInput.value, '');
+      assert.ok(mockDoc.activeElement === elements.itemSearchInput, 'Focus should stay in #itemSearchInput');
+      assert.deepStrictEqual(renderedIds(), ['item-3', 'item-2', 'item-1']);
+
+      // Pending debounce timer must have been cancelled
+      const firstNodeAfterEsc = elements.itemList.children[0];
+      t.mock.timers.tick(350);
+      assert.ok(elements.itemList.children[0] === firstNodeAfterEsc, 'Pending search debounce should be cancelled');
+    });
+
+    it('treats Escape in #itemSearchInput as a no-op when already empty or during IME composition', () => {
+      // Already empty: no-op
+      const firstNodeEmpty = elements.itemList.children[0];
+      const emptyEsc = createKeydownEvent('Escape');
+      elements.itemSearchInput.dispatchEvent(emptyEsc);
+
+      assert.strictEqual(emptyEsc.defaultPrevented, false);
+      assert.ok(elements.itemList.children[0] === firstNodeEmpty, 'Empty Escape must not re-render list');
+
+      // During IME composition: ignore Escape
+      elements.itemSearchInput.value = 'react';
+      const composingEsc = createKeydownEvent('Escape', { isComposing: true });
+      elements.itemSearchInput.dispatchEvent(composingEsc);
+
+      assert.strictEqual(composingEsc.defaultPrevented, false);
+      assert.strictEqual(elements.itemSearchInput.value, 'react');
+      assert.ok(elements.itemList.children[0] === firstNodeEmpty, 'Composing Escape must not re-render list');
+    });
+  });
+
+  describe('Actor Filter Input (#actorFilterInput & #clearActorFilterButton)', () => {
+    it('clears Actor filter input and refreshes list on #clearActorFilterButton click while preserving pinned Actor chips', () => {
+      // Pin "Dan Abramov" as an Actor chip
+      elements.actorFilterInput.value = 'Dan Abramov';
+      elements.addActorFilterButton.click();
+      assert.deepStrictEqual(renderedIds(), ['item-2', 'item-1']);
+      assert.strictEqual(elements.selectedActorFiltersContainer.querySelectorAll('.actor-chip').length, 1);
+
+      // Type additional live Actor filter "Ryan"
+      elements.actorFilterInput.value = 'Ryan';
+      elements.actorFilterInput.dispatchEvent({ type: 'input' });
+      assert.deepStrictEqual(renderedIds(), ['item-2']);
+
+      // Click clear button: clears live Actor filter only, keeps pinned Actor chip
+      elements.clearActorFilterButton.click();
+      assert.strictEqual(elements.actorFilterInput.value, '');
+      assert.deepStrictEqual(renderedIds(), ['item-2', 'item-1']);
+      assert.strictEqual(elements.selectedActorFiltersContainer.querySelectorAll('.actor-chip').length, 1);
+    });
+
+    it('clears Actor filter input, refreshes list, keeps focus, and preserves pinned Actor chips on Escape', () => {
+      // Pin "Dan Abramov"
+      elements.actorFilterInput.value = 'Dan Abramov';
+      elements.addActorFilterButton.click();
+      assert.deepStrictEqual(renderedIds(), ['item-2', 'item-1']);
+
+      // Type live Actor filter "Ryan" while focused
+      elements.actorFilterInput.focus();
+      elements.actorFilterInput.value = 'Ryan';
+      elements.actorFilterInput.dispatchEvent({ type: 'input' });
+      assert.deepStrictEqual(renderedIds(), ['item-2']);
+
+      const escEvent = createKeydownEvent('Escape');
+      elements.actorFilterInput.dispatchEvent(escEvent);
+
+      assert.strictEqual(escEvent.defaultPrevented, true);
+      assert.strictEqual(elements.actorFilterInput.value, '');
+      assert.ok(mockDoc.activeElement === elements.actorFilterInput, 'Focus should stay in #actorFilterInput');
+      assert.deepStrictEqual(renderedIds(), ['item-2', 'item-1']);
+      assert.strictEqual(elements.selectedActorFiltersContainer.querySelectorAll('.actor-chip').length, 1);
+
+      // Whitespace-only text in input is also cleared on Escape
+      elements.actorFilterInput.value = '   ';
+      elements.actorFilterInput.dispatchEvent({ type: 'input' });
+      const wsEsc = createKeydownEvent('Escape');
+      elements.actorFilterInput.dispatchEvent(wsEsc);
+      assert.strictEqual(wsEsc.defaultPrevented, true);
+      assert.strictEqual(elements.actorFilterInput.value, '');
+    });
+
+    it('treats Escape in #actorFilterInput as a no-op when already empty or during IME composition', () => {
+      // Already empty: no-op
+      const firstNodeEmpty = elements.itemList.children[0];
+      const emptyEsc = createKeydownEvent('Escape');
+      elements.actorFilterInput.dispatchEvent(emptyEsc);
+
+      assert.strictEqual(emptyEsc.defaultPrevented, false);
+      assert.ok(elements.itemList.children[0] === firstNodeEmpty, 'Empty Escape must not re-render list');
+
+      // During IME composition: ignore Escape
+      elements.actorFilterInput.value = 'Guido';
+      elements.actorFilterInput.dispatchEvent({ type: 'input' });
+      assert.deepStrictEqual(renderedIds(), ['item-3']);
+
+      const firstNodeFiltered = elements.itemList.children[0];
+      const composingEsc = createKeydownEvent('Escape', { isComposing: true });
+      elements.actorFilterInput.dispatchEvent(composingEsc);
+
+      assert.strictEqual(composingEsc.defaultPrevented, false);
+      assert.strictEqual(elements.actorFilterInput.value, 'Guido');
+      assert.ok(elements.itemList.children[0] === firstNodeFiltered, 'Composing Escape must not re-render list');
+    });
+  });
+
+  describe('Filter Reset Hygiene', () => {
+    it('clears #actorFilterInput and cancels pending search debounce in resetFilters()', (t) => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+
+      elements.actorFilterInput.value = 'Ryan';
+      elements.actorFilterInput.dispatchEvent({ type: 'input' });
+      assert.deepStrictEqual(renderedIds(), ['item-2']);
+
+      elements.itemSearchInput.value = 'nonexistent';
+      elements.itemSearchInput.dispatchEvent({ type: 'input' });
+
+      resetFilters();
+      assert.strictEqual(elements.itemSearchInput.value, '');
+      assert.strictEqual(elements.actorFilterInput.value, '');
+
+      // Pending search debounce timer from before resetFilters() must not fire
+      const nodeBeforeTick = elements.itemList.children[0];
+      t.mock.timers.tick(350);
+      assert.ok(elements.itemList.children[0] === nodeBeforeTick, 'Pending search debounce should be cancelled on resetFilters()');
+    });
+  });
+
+  describe('Actor Filter Clear Button Markup & Shared CSS (sidebar/sidebar.html)', () => {
+    it('wraps #actorFilterInput with #clearActorFilterButton before #addActorFilterButton and leaves #itemActorInput untouched', () => {
+      const actorFilterBlock = sidebarHtml.match(/<div id="actorFilterContainer">([\s\S]*?)<\/div>\s*<\/div>/);
+      assert.ok(actorFilterBlock, '#actorFilterContainer should exist in sidebar.html');
+
+      assert.match(
+        actorFilterBlock[1],
+        /<input[^>]*id="actorFilterInput"[^>]*list="actorFilterDatalist"[^>]*>[\s\S]*?<button[^>]*id="clearActorFilterButton"[^>]*type="button"[^>]*title="Clear actor filter"[^>]*>&times;<\/button>[\s\S]*?<button[^>]*id="addActorFilterButton"/,
+        '#clearActorFilterButton should follow #actorFilterInput inside wrapper and precede #addActorFilterButton'
+      );
+
+      // Ensure Add/Edit Item View #itemActorInput does NOT have a clear button added
+      const addItemActorSection = sidebarHtml.match(/<label for="itemActorInput">([\s\S]*?)<\/div>\s*<div id="selectedActorsContainer"/);
+      assert.ok(addItemActorSection, '#itemActorInput section should exist in sidebar.html');
+      assert.doesNotMatch(addItemActorSection[1], /clearActor/i);
+    });
+
+    it('shares right-padding input styles and clear-button positioning styles between search and actor filter controls', () => {
+      const inputRule = sidebarHtml.match(/#itemSearchInput\s*,\s*#actorFilterInput\s*\{([^}]+)\}/);
+      assert.ok(inputRule, '#itemSearchInput and #actorFilterInput should share an input CSS rule');
+      assert.match(inputRule[1], /padding\s*:\s*6px\s+24px\s+6px\s+8px/i);
+
+      const clearBtnRule = sidebarHtml.match(/#clearSearchButton\s*,\s*#clearActorFilterButton\s*\{([^}]+)\}/);
+      assert.ok(clearBtnRule, '#clearSearchButton and #clearActorFilterButton should share a clear-button CSS rule');
+      assert.match(clearBtnRule[1], /position\s*:\s*absolute/i);
+      assert.match(clearBtnRule[1], /right\s*:\s*5px/i);
     });
   });
 });
