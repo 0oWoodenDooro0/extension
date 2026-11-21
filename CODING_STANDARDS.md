@@ -10,10 +10,9 @@ Judgement standards for code reviews in this repository. Consulted by the review
 
 ## Test Architecture & Performance
 
-- **Fixture I/O Hygiene**: Load and cache static templates (such as `sidebar.html`) once at the test module or suite scope. Do not re-read template files from disk inside individual `it(...)` blocks.
+- **Fixture I/O Hygiene**: Load and cache static templates (such as `sidebar.html`) once at the test module or suite scope instead of re-reading them inside individual `it(...)` blocks.
 - **Pure Behavioral Assertions**: Assert external behaviors (rendered DOM elements, emitted storage events, navigation calls) rather than testing internal private variables or redundant parameter permutations.
-- **Network Isolation**: Unit tests must maintain pure local execution. Never perform real HTTP requests; inject stubs for `globalThis.fetch`.
 
 ## Domain Language Integrity
 
-- Strictly adhere to [GLOSSARY.md](GLOSSARY.md) across code symbols, test descriptions, comments, and commit messages. Never drift to prohibited synonyms (e.g. use `Item` / `Collection Item`, never `Article` or `Bookmark`).
+- Use terms from [GLOSSARY.md](GLOSSARY.md) across code symbols, test descriptions, comments, and commit messages.
