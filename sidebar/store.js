@@ -296,16 +296,23 @@ export class CollectionStore {
       });
     }
 
-    // 3. 全文搜尋 (Search across title, url, actors, identifier)
+    // 3. 全文搜尋 (Multi-term AND search across title, url, actors, identifier; excludes tags)
     const cleanSearch = (search || '').trim().toLowerCase();
     if (cleanSearch) {
+      const searchTokens = cleanSearch.split(/\s+/);
       results = results.filter(item => {
-        const titleMatch = item.title && item.title.toLowerCase().includes(cleanSearch);
-        const urlMatch = item.url && item.url.toLowerCase().includes(cleanSearch);
-        const actors = Array.isArray(item.actors) ? item.actors : [];
-        const actorMatch = actors.some(a => (a || '').toLowerCase().includes(cleanSearch));
-        const identifierMatch = item.identifier && item.identifier.toLowerCase().includes(cleanSearch);
-        return titleMatch || urlMatch || actorMatch || identifierMatch;
+        const title = item.title ? item.title.toLowerCase() : '';
+        const url = item.url ? item.url.toLowerCase() : '';
+        const itemActors = Array.isArray(item.actors)
+          ? item.actors.map(a => (a || '').toLowerCase())
+          : [];
+        const identifier = item.identifier ? item.identifier.toLowerCase() : '';
+        return searchTokens.every(token =>
+          title.includes(token) ||
+          url.includes(token) ||
+          itemActors.some(a => a.includes(token)) ||
+          identifier.includes(token)
+        );
       });
     }
 

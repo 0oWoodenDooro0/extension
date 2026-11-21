@@ -317,6 +317,50 @@ describe('CollectionStore (Collection Items, Tags & Actors)', () => {
       const empty = store.getRandomItem({ search: 'nonexistent-xyz' });
       assert.strictEqual(empty, null);
     });
+
+    it('matches multi-term AND search across title, URL, Actors, and identifier with whitespace normalization', () => {
+      assert.deepStrictEqual(store.queryItems({ search: 'dan react' }).map(i => i.id), ['item-1']);
+      assert.deepStrictEqual(
+        store.queryItems({ search: 'ryan nodejs.org node-guide-01' }).map(i => i.id),
+        ['item-2']
+      );
+      assert.deepStrictEqual(
+        store.queryItems({ search: '  GUIDE  \t \u3000  abramov  ' }).map(i => i.id),
+        ['item-2']
+      );
+      assert.deepStrictEqual(
+        store.queryItems({ search: 'python\u3000guido' }).map(i => i.id),
+        ['item-3']
+      );
+    });
+
+    it('excludes Collection Items when any search term misses or only matches Tags', () => {
+      assert.deepStrictEqual(store.queryItems({ search: 'dan python' }), []);
+      assert.deepStrictEqual(store.queryItems({ search: 'react nonexistent' }), []);
+      assert.deepStrictEqual(store.queryItems({ search: 'frontend' }), []);
+      assert.deepStrictEqual(store.queryItems({ search: 'react frontend' }), []);
+      assert.deepStrictEqual(store.queryItems({ search: 'python ai' }), []);
+    });
+
+    it('returns all Collection Items for empty or whitespace-only search queries including full-width spaces', () => {
+      const allIds = ['item-4', 'item-3', 'item-2', 'item-1'];
+      assert.deepStrictEqual(store.queryItems({ search: '' }).map(i => i.id), allIds);
+      assert.deepStrictEqual(store.queryItems({ search: '   \t  ' }).map(i => i.id), allIds);
+      assert.deepStrictEqual(store.queryItems({ search: '\u3000 \u3000' }).map(i => i.id), allIds);
+    });
+
+    it('combines multi-term AND search with Tag and Actor filters and inherits it in getRandomItem', () => {
+      const combined = store.queryItems({
+        tags: ['JavaScript'],
+        actors: ['Dan'],
+        search: 'nodejs guide'
+      });
+      assert.deepStrictEqual(combined.map(i => i.id), ['item-2']);
+
+      assert.strictEqual(store.getRandomItem({ search: 'ryan node-guide' })?.id, 'item-2');
+      assert.strictEqual(store.getRandomItem({ search: 'dan react' })?.id, 'item-1');
+      assert.strictEqual(store.getRandomItem({ search: 'dan python' }), null);
+    });
   });
 
   describe('Cross-Window Synchronization & Subscriptions', () => {
